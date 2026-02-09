@@ -25,7 +25,7 @@ public:
 
   /// \brief Get the current hidden state
   /// \return Hidden state vector
-  Eigen::VectorXf get_hidden_state() const { return this->_xh(Eigen::placeholders::lastN(this->_get_hidden_size())); };
+  Eigen::VectorXf get_hidden_state() const { return this->_xh.tail(this->_get_hidden_size()); };
 
   /// \brief Process a single input vector
   /// \param x Input vector

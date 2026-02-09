@@ -4,6 +4,7 @@
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -143,7 +144,7 @@ void test_load_and_process_nam_files()
   // Paths are relative to root directory where tests run (./build/tools/run_tests)
   const std::vector<std::string> nam_files = {"example_models/wavenet.nam", "example_models/lstm.nam",
                                               "example_models/wavenet_condition_dsp.nam",
-                                              "example_models/wavenet_a2_max.nam"};
+                                              "example_models/wavenet_a2_max.nam", "example_models/catwavenet.nam"};
 
   const int num_buffers = 3;
   const int buffer_size = 64;
@@ -159,6 +160,30 @@ void test_load_and_process_nam_files()
     // Process buffers through the model
     process_buffers(dsp.get(), num_buffers, buffer_size);
   }
+}
+
+void test_catwavenet_parameter_api()
+{
+  std::unique_ptr<nam::DSP> dsp = nam::get_dsp(std::filesystem::path("example_models/catwavenet.nam"));
+  assert(dsp != nullptr);
+  assert(dsp->HasParameters());
+  assert(dsp->GetParameterCount() == 1);
+
+  const auto& descriptors = dsp->GetParameterDescriptors();
+  assert(descriptors.size() == 1);
+  assert(descriptors[0].name == "Gain");
+  assert(descriptors[0].type == nam::ParameterType::Continuous);
+  assert(descriptors[0].min_value.has_value());
+  assert(descriptors[0].max_value.has_value());
+  assert(*descriptors[0].min_value == 0.0);
+  assert(*descriptors[0].max_value == 1.0);
+
+  dsp->SetParameter("gain", -1.0);
+  assert(dsp->GetParameter("Gain") == 0.0);
+  dsp->SetParameter("Gain", 2.0);
+  assert(dsp->GetParameter("GAIN") == 1.0);
+
+  process_buffers(dsp.get(), 2, 32);
 }
 
 // Helper function to create a config string with a specific version

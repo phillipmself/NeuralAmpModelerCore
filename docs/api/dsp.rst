@@ -5,6 +5,13 @@ DSP API
    :project: NeuralAmpModelerCore
    :members:
 
+.. doxygenenum:: nam::ParameterType
+   :project: NeuralAmpModelerCore
+
+.. doxygenstruct:: nam::ParameterDescriptor
+   :project: NeuralAmpModelerCore
+   :members:
+
 .. doxygenclass:: nam::Buffer
    :project: NeuralAmpModelerCore
    :members:

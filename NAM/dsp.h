@@ -1,8 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <filesystem>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -27,6 +29,23 @@ namespace wavenet
 /// Forward declaration to allow WaveNet to access protected members of DSP
 class WaveNet;
 } // namespace wavenet
+
+/// \brief Runtime parameter type for parametric models
+enum class ParameterType
+{
+  Boolean, ///< Discrete on/off parameter represented as 0.0 or 1.0
+  Continuous ///< Continuous parameter represented as a float/double value
+};
+
+/// \brief Descriptor for a runtime parameter exposed by a DSP model
+struct ParameterDescriptor
+{
+  std::string name; ///< Display name of the parameter (case-preserving)
+  ParameterType type = ParameterType::Continuous; ///< Parameter value type
+  double default_value = 0.0; ///< Default value loaded from model metadata
+  std::optional<double> min_value; ///< Optional lower bound (continuous parameters)
+  std::optional<double> max_value; ///< Optional upper bound (continuous parameters)
+};
 
 
 /// \brief Base class for all DSP models
@@ -154,6 +173,36 @@ public:
   /// \param outputLevel Output level in dBu
   void SetOutputLevel(const double outputLevel);
 
+  /// \brief Check whether this model exposes runtime parameters
+  /// \return true if at least one parameter is available
+  bool HasParameters() const;
+
+  /// \brief Get the number of runtime parameters
+  /// \return Number of parameters
+  size_t GetParameterCount() const;
+
+  /// \brief Get descriptors for all runtime parameters
+  /// \return Ordered parameter descriptor list
+  const std::vector<ParameterDescriptor>& GetParameterDescriptors() const;
+
+  /// \brief Set a parameter value by name (case-insensitive)
+  ///
+  /// For boolean parameters, nonzero values map to 1.0 and zero maps to 0.0.
+  /// For continuous parameters, values are clamped to min/max bounds when present.
+  ///
+  /// \param name Parameter name
+  /// \param value New value
+  /// \throws std::runtime_error If the model has no parameters
+  /// \throws std::out_of_range If the parameter name is unknown
+  void SetParameter(const std::string& name, const double value);
+
+  /// \brief Get a parameter value by name (case-insensitive)
+  /// \param name Parameter name
+  /// \return Current value
+  /// \throws std::runtime_error If the model has no parameters
+  /// \throws std::out_of_range If the parameter name is unknown
+  double GetParameter(const std::string& name) const;
+
 protected:
   friend class wavenet::WaveNet; // Allow WaveNet to access protected members. Used in condition DSP.
 
@@ -182,6 +231,14 @@ protected:
   /// \return Maximum buffer size
   int GetMaxBufferSize() const { return mMaxBufferSize; };
 
+  /// \brief Configure runtime parameters for a parametric model
+  /// \param descriptors Parameter descriptors in deterministic order
+  void ConfigureParameters(const std::vector<ParameterDescriptor>& descriptors);
+
+  /// \brief Snapshot current parameter values in descriptor order
+  /// \param destination Pre-sized destination buffer
+  void SnapshotParameterValues(std::vector<float>& destination) const;
+
 private:
   const int mInChannels;
   const int mOutChannels;
@@ -193,6 +250,11 @@ private:
   // Note: input/output levels are assumed global over all inputs/outputs
   Level mInputLevel;
   Level mOutputLevel;
+
+  std::vector<ParameterDescriptor> mParameterDescriptors;
+  std::unordered_map<std::string, size_t> mParameterIndexByName;
+  std::unique_ptr<std::atomic<double>[]> mParameterValues;
+  size_t mParameterCount = 0;
 };
 
 /// \brief Base class for DSP models that require input buffering

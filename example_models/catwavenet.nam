@@ -1,0 +1,40 @@
+{
+  "version": "0.5.4",
+  "metadata": {},
+  "architecture": "CatWaveNet",
+  "config": {
+    "in_channels": 1,
+    "layers": [
+      {
+        "input_size": 2,
+        "condition_size": 2,
+        "head_size": 1,
+        "channels": 2,
+        "kernel_size": 1,
+        "dilations": [1],
+        "activation": "Tanh",
+        "gated": false,
+        "head_bias": false
+      }
+    ],
+    "head": null,
+    "head_scale": 1.0,
+    "parametric": {
+      "Gain": {
+        "type": "continuous",
+        "default_value": 0.5,
+        "minval": 0.0,
+        "maxval": 1.0
+      }
+    }
+  },
+  "weights": [
+    0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 1.0
+  ],
+  "sample_rate": 48000.0
+}

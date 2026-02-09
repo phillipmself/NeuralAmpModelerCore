@@ -7,8 +7,8 @@ add_custom_target(tools ALL
 	DEPENDS ${TOOLS})
 
 include_directories(tools ..)
-include_directories(tools ${NAM_DEPS_PATH}/eigen)
-include_directories(tools ${NAM_DEPS_PATH}/nlohmann)
+include_directories(SYSTEM ${NAM_DEPS_PATH}/eigen)
+include_directories(SYSTEM ${NAM_DEPS_PATH}/nlohmann)
 
 add_executable(loadmodel loadmodel.cpp ${NAM_SOURCES})
 add_executable(benchmodel benchmodel.cpp ${NAM_SOURCES})
@@ -55,6 +55,10 @@ else()
 		"$<$<CONFIG:DEBUG>:-Og;-ggdb;-Werror>"
 		"$<$<CONFIG:RELEASE>:-Ofast>"
 	)
+	if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		target_compile_options(${TOOLS} PRIVATE -Wno-deprecated-anon-enum-enum-conversion)
+		target_compile_options(run_tests PRIVATE -Wno-deprecated-volatile)
+	endif()
 endif()
 
 # There's an error in eigen's

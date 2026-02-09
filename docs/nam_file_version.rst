@@ -12,6 +12,13 @@ Improvements where the model will be loaded correctly, but possibly with some in
 functionality will trigger a version bump communicating a non-breaking change 
 (e.g. minor version or patch pre-v1.0.0).
 
+Parametric model metadata
+-------------------------
+
+Parametric architectures (currently ``CatWaveNet``) store runtime control
+metadata in ``config.parametric``. Core reads this object to expose parameter names, types,
+defaults, and optional continuous ranges.
+
 Version history
 ---------------
 

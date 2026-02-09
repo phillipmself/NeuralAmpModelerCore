@@ -713,6 +713,33 @@ private:
   int PrewarmSamples() override { return mPrewarmSamples; };
 };
 
+/// \brief Parametric WaveNet variant that concatenates runtime parameters to condition input
+class CatWaveNet : public WaveNet
+{
+public:
+  /// \brief Constructor
+  ///
+  /// \param in_channels Number of audio input channels (excluding parameter channels)
+  /// \param layer_array_params Parameters for each layer array
+  /// \param head_scale Scaling factor applied to final head output
+  /// \param with_head Whether to use custom head module (not currently supported)
+  /// \param parameter_descriptors Runtime parameter descriptors
+  /// \param weights Model weights
+  /// \param condition_dsp Optional condition DSP (currently unsupported for CatWaveNet)
+  /// \param expected_sample_rate Expected sample rate in Hz
+  CatWaveNet(const int in_channels, const std::vector<LayerArrayParams>& layer_array_params, const float head_scale,
+             const bool with_head, const std::vector<ParameterDescriptor>& parameter_descriptors,
+             std::vector<float> weights, std::unique_ptr<DSP> condition_dsp, const double expected_sample_rate = -1.0);
+
+protected:
+  int _get_condition_dim() const override { return mConditionDim; }
+  void _set_condition_array(NAM_SAMPLE** input, const int num_frames) override;
+
+private:
+  int mConditionDim = 0;
+  std::vector<float> mParamSnapshot;
+};
+
 /// \brief Factory function to instantiate WaveNet from JSON configuration
 /// \param config JSON configuration object
 /// \param weights Model weights vector
@@ -720,5 +747,13 @@ private:
 /// \return Unique pointer to a DSP object (WaveNet instance)
 std::unique_ptr<DSP> Factory(const nlohmann::json& config, std::vector<float>& weights,
                              const double expectedSampleRate);
+
+/// \brief Factory function to instantiate CatWaveNet from JSON configuration
+/// \param config JSON configuration object (must include `parametric`)
+/// \param weights Model weights vector
+/// \param expectedSampleRate Expected sample rate in Hz (-1.0 if unknown)
+/// \return Unique pointer to a DSP object (CatWaveNet instance)
+std::unique_ptr<DSP> CatFactory(const nlohmann::json& config, std::vector<float>& weights,
+                                const double expectedSampleRate);
 }; // namespace wavenet
 }; // namespace nam

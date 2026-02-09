@@ -6,6 +6,7 @@
 #include <Eigen/Dense>
 
 #include "get_dsp.h"
+#include "parametric.h"
 #include "registry.h"
 #include "wavenet.h"
 
@@ -568,24 +569,82 @@ void nam::wavenet::WaveNet::process(NAM_SAMPLE** input, NAM_SAMPLE** output, con
   }
 }
 
-// Factory to instantiate from nlohmann json
-std::unique_ptr<nam::DSP> nam::wavenet::Factory(const nlohmann::json& config, std::vector<float>& weights,
-                                                const double expectedSampleRate)
+nam::wavenet::CatWaveNet::CatWaveNet(const int in_channels,
+                                     const std::vector<nam::wavenet::LayerArrayParams>& layer_array_params,
+                                     const float head_scale, const bool with_head,
+                                     const std::vector<ParameterDescriptor>& parameter_descriptors,
+                                     std::vector<float> weights, std::unique_ptr<DSP> condition_dsp,
+                                     const double expected_sample_rate)
+: WaveNet(in_channels, layer_array_params, head_scale, with_head, std::move(weights), std::move(condition_dsp),
+          expected_sample_rate)
+, mConditionDim(in_channels + (int)parameter_descriptors.size())
 {
+  ConfigureParameters(parameter_descriptors);
+  mParamSnapshot.resize(parameter_descriptors.size(), 0.0f);
+
+  for (size_t i = 0; i < layer_array_params.size(); i++)
+  {
+    if (layer_array_params[i].condition_size != mConditionDim)
+    {
+      throw std::runtime_error("CatWaveNet layer array " + std::to_string(i) + " has condition_size "
+                               + std::to_string(layer_array_params[i].condition_size) + " but expected "
+                               + std::to_string(mConditionDim) + " (= in_channels + param_count).");
+    }
+  }
+}
+
+void nam::wavenet::CatWaveNet::_set_condition_array(NAM_SAMPLE** input, const int num_frames)
+{
+  const int in_channels = NumInputChannels();
+  for (int ch = 0; ch < in_channels; ch++)
+  {
+    for (int j = 0; j < num_frames; j++)
+    {
+      this->_condition_input(ch, j) = input[ch][j];
+    }
+  }
+
+  SnapshotParameterValues(mParamSnapshot);
+  for (size_t p = 0; p < mParamSnapshot.size(); p++)
+  {
+    const int param_row = in_channels + (int)p;
+    for (int j = 0; j < num_frames; j++)
+    {
+      this->_condition_input(param_row, j) = mParamSnapshot[p];
+    }
+  }
+}
+
+namespace
+{
+namespace activations = nam::activations;
+using GatingMode = nam::wavenet::GatingMode;
+
+struct ParsedWaveNetConfig
+{
+  std::vector<nam::wavenet::LayerArrayParams> layer_array_params;
+  bool with_head = false;
+  float head_scale = 1.0f;
+  int in_channels = 1;
   std::unique_ptr<nam::DSP> condition_dsp = nullptr;
+};
+
+ParsedWaveNetConfig ParseWaveNetConfig(const nlohmann::json& config, const double expectedSampleRate)
+{
+  ParsedWaveNetConfig parsed;
   if (config.find("condition_dsp") != config.end())
   {
     const nlohmann::json& condition_dsp_json = config["condition_dsp"];
-    condition_dsp = nam::get_dsp(condition_dsp_json);
-    if (condition_dsp->GetExpectedSampleRate() != expectedSampleRate)
+    parsed.condition_dsp = nam::get_dsp(condition_dsp_json);
+    if (parsed.condition_dsp->GetExpectedSampleRate() != expectedSampleRate)
     {
       std::stringstream ss;
-      ss << "Condition DSP expected sample rate (" << condition_dsp->GetExpectedSampleRate()
+      ss << "Condition DSP expected sample rate (" << parsed.condition_dsp->GetExpectedSampleRate()
          << ") doesn't match WaveNet expected sample rate (" << expectedSampleRate << "!\n";
       throw std::runtime_error(ss.str().c_str());
     }
   }
-  std::vector<nam::wavenet::LayerArrayParams> layer_array_params;
+
   for (size_t i = 0; i < config["layers"].size(); i++)
   {
     nlohmann::json layer_config = config["layers"][i];
@@ -637,6 +696,7 @@ std::unique_ptr<nam::DSP> nam::wavenet::Factory(const nlohmann::json& config, st
         activations::ActivationConfig::from_json(layer_config["activation"]);
       activation_configs.resize(num_layers, activation_config);
     }
+
     // Parse gating mode(s) - support both single value and array, and old "gated" boolean
     std::vector<GatingMode> gating_modes;
     std::vector<activations::ActivationConfig> secondary_activation_configs;
@@ -813,29 +873,59 @@ std::unique_ptr<nam::DSP> nam::wavenet::Factory(const nlohmann::json& config, st
                                + ": layer1x1_post_film cannot be active when layer1x1.active is false");
     }
 
-    layer_array_params.push_back(nam::wavenet::LayerArrayParams(
+    parsed.layer_array_params.push_back(nam::wavenet::LayerArrayParams(
       input_size, condition_size, head_size, channels, bottleneck, kernel_size, dilations,
       std::move(activation_configs), std::move(gating_modes), head_bias, groups, groups_input_mixin, layer1x1_params,
       head1x1_params, std::move(secondary_activation_configs), conv_pre_film_params, conv_post_film_params,
       input_mixin_pre_film_params, input_mixin_post_film_params, activation_pre_film_params,
       activation_post_film_params, _layer1x1_post_film_params, head1x1_post_film_params));
   }
-  const bool with_head = !config["head"].is_null();
-  const float head_scale = config["head_scale"];
 
-  if (layer_array_params.empty())
+  parsed.with_head = !config["head"].is_null();
+  parsed.head_scale = config["head_scale"];
+
+  if (parsed.layer_array_params.empty())
     throw std::runtime_error("WaveNet config requires at least one layer array");
 
   // Backward compatibility: assume 1 input channel
-  const int in_channels = config.value("in_channels", 1);
+  parsed.in_channels = config.value("in_channels", 1);
+  return parsed;
+}
+} // namespace
 
-  // out_channels is determined from last layer array's head_size
-  return std::make_unique<nam::wavenet::WaveNet>(
-    in_channels, layer_array_params, head_scale, with_head, weights, std::move(condition_dsp), expectedSampleRate);
+// Factory to instantiate from nlohmann json
+std::unique_ptr<nam::DSP> nam::wavenet::Factory(const nlohmann::json& config, std::vector<float>& weights,
+                                                const double expectedSampleRate)
+{
+  ParsedWaveNetConfig parsed = ParseWaveNetConfig(config, expectedSampleRate);
+  return std::make_unique<nam::wavenet::WaveNet>(parsed.in_channels, parsed.layer_array_params, parsed.head_scale,
+                                                 parsed.with_head, weights, std::move(parsed.condition_dsp),
+                                                 expectedSampleRate);
+}
+
+std::unique_ptr<nam::DSP> nam::wavenet::CatFactory(const nlohmann::json& config, std::vector<float>& weights,
+                                                   const double expectedSampleRate)
+{
+  if (config.find("parametric") == config.end())
+  {
+    throw std::runtime_error("CatWaveNet model is missing required `config.parametric` block.");
+  }
+  const std::vector<ParameterDescriptor> descriptors = nam::parametric::ParseParameterDescriptors(config["parametric"]);
+
+  ParsedWaveNetConfig parsed = ParseWaveNetConfig(config, expectedSampleRate);
+  if (parsed.condition_dsp != nullptr)
+  {
+    throw std::runtime_error("CatWaveNet with condition_dsp is not supported.");
+  }
+
+  return std::make_unique<nam::wavenet::CatWaveNet>(parsed.in_channels, parsed.layer_array_params, parsed.head_scale,
+                                                    parsed.with_head, descriptors, weights,
+                                                    std::move(parsed.condition_dsp), expectedSampleRate);
 }
 
 // Register the factory
 namespace
 {
 static nam::factory::Helper _register_WaveNet("WaveNet", nam::wavenet::Factory);
-}
+static nam::factory::Helper _register_CatWaveNet("CatWaveNet", nam::wavenet::CatFactory);
+} // namespace

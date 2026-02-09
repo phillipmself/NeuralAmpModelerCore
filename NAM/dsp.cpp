@@ -2,6 +2,7 @@
 #include <cmath> // pow, tanh, expf
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -9,6 +10,7 @@
 
 #include "dsp.h"
 #include "registry.h"
+#include "util.h"
 
 #define tanh_impl_ std::tanh
 // #define tanh_impl_ fast_tanh_
@@ -141,6 +143,117 @@ void nam::DSP::SetOutputLevel(const double outputLevel)
 {
   mOutputLevel.haveLevel = true;
   mOutputLevel.level = outputLevel;
+}
+
+bool nam::DSP::HasParameters() const
+{
+  return !mParameterDescriptors.empty();
+}
+
+size_t nam::DSP::GetParameterCount() const
+{
+  return mParameterDescriptors.size();
+}
+
+const std::vector<nam::ParameterDescriptor>& nam::DSP::GetParameterDescriptors() const
+{
+  return mParameterDescriptors;
+}
+
+void nam::DSP::SetParameter(const std::string& name, const double value)
+{
+  if (!HasParameters())
+  {
+    throw std::runtime_error("This model does not expose runtime parameters.");
+  }
+
+  const auto it = mParameterIndexByName.find(util::lowercase(name));
+  if (it == mParameterIndexByName.end())
+  {
+    throw std::out_of_range("Unknown model parameter: " + name);
+  }
+
+  const size_t index = it->second;
+  const auto& descriptor = mParameterDescriptors[index];
+
+  double normalized = value;
+  if (descriptor.type == ParameterType::Boolean)
+  {
+    normalized = value == 0.0 ? 0.0 : 1.0;
+  }
+  else
+  {
+    if (descriptor.min_value.has_value() && normalized < *descriptor.min_value)
+    {
+      normalized = *descriptor.min_value;
+    }
+    if (descriptor.max_value.has_value() && normalized > *descriptor.max_value)
+    {
+      normalized = *descriptor.max_value;
+    }
+  }
+
+  mParameterValues[index].store(normalized, std::memory_order_relaxed);
+}
+
+double nam::DSP::GetParameter(const std::string& name) const
+{
+  if (!HasParameters())
+  {
+    throw std::runtime_error("This model does not expose runtime parameters.");
+  }
+
+  const auto it = mParameterIndexByName.find(util::lowercase(name));
+  if (it == mParameterIndexByName.end())
+  {
+    throw std::out_of_range("Unknown model parameter: " + name);
+  }
+
+  return mParameterValues[it->second].load(std::memory_order_relaxed);
+}
+
+void nam::DSP::ConfigureParameters(const std::vector<ParameterDescriptor>& descriptors)
+{
+  mParameterDescriptors = descriptors;
+  mParameterCount = descriptors.size();
+  if (mParameterCount > 0)
+  {
+    mParameterValues = std::make_unique<std::atomic<double>[]>(mParameterCount);
+  }
+  else
+  {
+    mParameterValues.reset();
+  }
+  mParameterIndexByName.clear();
+  mParameterIndexByName.reserve(descriptors.size());
+
+  for (size_t i = 0; i < descriptors.size(); i++)
+  {
+    const auto& descriptor = descriptors[i];
+    const std::string lookup_name = util::lowercase(descriptor.name);
+    if (lookup_name.empty())
+    {
+      throw std::runtime_error("Parameter names must be non-empty.");
+    }
+    if (mParameterIndexByName.find(lookup_name) != mParameterIndexByName.end())
+    {
+      throw std::runtime_error("Duplicate parameter name: " + descriptor.name);
+    }
+    mParameterIndexByName[lookup_name] = i;
+    SetParameter(descriptor.name, descriptor.default_value);
+  }
+}
+
+void nam::DSP::SnapshotParameterValues(std::vector<float>& destination) const
+{
+  if (destination.size() != mParameterCount)
+  {
+    throw std::runtime_error("Parameter snapshot buffer size mismatch.");
+  }
+  for (size_t i = 0; i < mParameterCount; i++)
+  {
+    destination[i] = (float)mParameterValues[i].load(std::memory_order_relaxed);
+  }
 }
 
 // Buffer =====================================================================

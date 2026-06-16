@@ -16,6 +16,7 @@ set(_nam_project_version "${_nam_version_MAJOR}.${_nam_version_MINOR}.${_nam_ver
 project(NAM VERSION "${_nam_project_version}")
 
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 	set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type (Release, Debug, RelWithDebInfo, MinSizeRel)" FORCE)

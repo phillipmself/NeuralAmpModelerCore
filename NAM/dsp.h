@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <iterator>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -223,6 +224,32 @@ private:
   // Note: input/output levels are assumed global over all inputs/outputs
   Level mInputLevel;
   Level mOutputLevel;
+};
+
+/// \brief Interface for DSP objects that support runtime parameter control.
+///
+/// Parametric DSPs implement this alongside DSP. Hosts discover the capability
+/// via dynamic_cast<IParametricControl*>(dsp.get()).
+///
+/// Contract: the host calls SetParams() between process() calls; process()
+/// consumes the most recently committed vector for the full block.
+/// SetParams() is allocation-free after construction (storage is pre-sized
+/// from param_dim / nominal_params at object creation).
+class IParametricControl
+{
+public:
+  virtual ~IParametricControl() = default;
+
+  /// Replace the current parameter vector consumed by the next process() block.
+  /// \throws std::invalid_argument if params.size() != ParamDim().
+  virtual void SetParams(std::span<const float> params) = 0;
+
+  /// Read back the currently committed parameter vector.
+  /// Reflects the last SetParams() call, or nominal_params at construction.
+  virtual std::span<const float> GetParams() const = 0;
+
+  /// Dimensionality of the parameter vector accepted by SetParams().
+  virtual int ParamDim() const = 0;
 };
 
 /// \brief Base class for DSP models that require input buffering

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <optional>
@@ -52,6 +53,8 @@ struct ParametricWaveNetConfig : public ModelConfig
 /// - SetParams() updates _params (allocation-free) and sets _params_dirty.
 /// - process() calls Recompute() on each adapter once if dirty, then delegates to WaveNet::process().
 /// - Reset() does NOT reseed nominal params; the host owns param state after construction.
+/// - Access is intentionally unsynchronized; the host must serialize
+///   SetParams()/GetParams()/process()/Reset() per IParametricControl.
 class ParametricWaveNet : public WaveNet, public IParametricControl
 {
 public:
@@ -79,7 +82,10 @@ public:
                     double sample_rate);
 
   // IParametricControl
-  /// Replace the current parameter vector. Allocation-free; throws std::invalid_argument on dim mismatch.
+  /// Replace the current parameter vector.
+  /// Allocation-free after construction; throws std::invalid_argument on dim mismatch.
+  /// Intentionally unsynchronized: the host must ensure this does not overlap
+  /// with process(), Reset(), prewarm(), or destruction.
   void SetParams(std::span<const float> params) override;
   std::span<const float> GetParams() const override;
   int ParamDim() const override;
@@ -88,11 +94,21 @@ public:
   void process(NAM_SAMPLE** input, NAM_SAMPLE** output, const int num_frames) override;
 
 private:
+#ifndef NDEBUG
+  /// Debug checks to catch concurrent access to the param API for debug builds
+  /// Not a thread safety mechanism!
+  void _debug_enter_param_api_();
+  void _debug_leave_param_api_();
+#endif
+
   std::vector<ParametricAdapter> _adapters;         // one per distinct C, sorted-C order
   std::map<int, size_t> _channel_to_adapter_index;  // C -> index into _adapters
   std::vector<float> _params;                        // current param vector (pre-sized)
   int _param_dim;
   bool _params_dirty = true;
+#ifndef NDEBUG
+  std::atomic_flag _debug_param_api_active = ATOMIC_FLAG_INIT;
+#endif
 };
 
 /// \brief Config parser for "ParametricWaveNet" — auto-registered at startup via ConfigParserHelper

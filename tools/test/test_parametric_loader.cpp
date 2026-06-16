@@ -1,6 +1,7 @@
-// C2.2c: ParametricWaveNet loader tests.
+// C2.2c + C2.3: ParametricWaveNet loader tests.
 //
 // CP1: parser registration guard (has() == true).
+// RG1: unknown architecture is rejected with registry-error message (C2.3).
 // CP2: config-shape negative cases (malformed param_names / param_dim / nominal_params).
 // CP3: adapter-tail weight-count validation (negative: too-short blob; positive: exact size).
 // CP4: real round-trip — get_dsp(), Reset(), process(), IParametricControl discovery.
@@ -111,6 +112,33 @@ void test_cp4_real_load_and_process()
   // No sample-value assertions here (C2.2d owns parity / behavior-change evidence).
 }
 
+// RG1: an explicitly unknown architecture must throw the registry-error message.
+// Use an otherwise valid-shaped fixture so this isolates registry lookup instead
+// of depending on unrelated validation order.
+void test_rg1_unknown_architecture_throws()
+{
+  const int inner_count = test_parametric_fixtures::compute_a2_inner_weight_count();
+  const int total_count = inner_count + test_parametric_fixtures::kA2AdapterCount;
+  nlohmann::json j = test_parametric_fixtures::build_a2_parametric_fixture(
+    std::vector<float>(total_count, 0.0f));
+  j["architecture"] = "DefinitelyUnknownArchitecture";
+
+  bool caught = false;
+  try
+  {
+    nam::get_dsp(j);
+    assert(false); // must not reach here
+  }
+  catch (const std::runtime_error& e)
+  {
+    const std::string msg = e.what();
+    assert(msg.find("No config parser registered for architecture: DefinitelyUnknownArchitecture")
+           != std::string::npos);
+    caught = true;
+  }
+  assert(caught);
+}
+
 // --- CP2: config-shape negative cases (C1.3) — unchanged ---
 
 // Wraps get_dsp() and asserts a runtime_error whose message contains `needle`.
@@ -201,6 +229,8 @@ void run_parametric_loader_tests()
 {
   // CP1: registration
   test_parametric_loader::test_cp1_parser_is_registered();
+  // RG1: unknown architecture is rejected with registry-error message (C2.3)
+  test_parametric_loader::test_rg1_unknown_architecture_throws();
   // CP3: weight-count validation (C2.2c)
   test_parametric_loader::test_cp3_adapter_tail_too_short();
   test_parametric_loader::test_cp3_correct_size_constructs();

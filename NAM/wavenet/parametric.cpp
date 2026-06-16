@@ -1,5 +1,6 @@
 #include "parametric.h"
 
+#include <cassert>
 #include <algorithm>
 #include <stdexcept>
 #include <string>
@@ -27,10 +28,17 @@ ParametricWaveNet::ParametricWaveNet(int in_channels,
 : WaveNet(in_channels, layer_array_params, head_scale, with_head,
           std::move(head_params), std::move(inner_weights),
           std::move(condition_dsp), sample_rate)
-, _param_dim(param_dim)
 , _params(std::move(nominal_params))
+, _param_dim(param_dim)
 , _params_dirty(true)
 {
+  if (_param_dim < 0)
+    throw std::invalid_argument("ParametricWaveNet: param_dim must be non-negative");
+  if (static_cast<int>(_params.size()) != _param_dim)
+    throw std::invalid_argument(
+      "ParametricWaveNet: nominal_params size " + std::to_string(_params.size())
+      + " does not match param_dim " + std::to_string(_param_dim));
+
   // Build adapters from adapter_tail in sorted distinct-C order and map C → index.
   auto distinct_Cs = parametric_distinct_channel_sizes(layer_array_params);
   _adapters.reserve(distinct_Cs.size());
@@ -57,17 +65,38 @@ ParametricWaveNet::ParametricWaveNet(int in_channels,
 
 void ParametricWaveNet::SetParams(std::span<const float> params)
 {
-  if (static_cast<int>(params.size()) != _param_dim)
-    throw std::invalid_argument(
-      "ParametricWaveNet::SetParams: expected " + std::to_string(_param_dim)
-      + " params, got " + std::to_string(static_cast<int>(params.size())));
-  std::copy(params.begin(), params.end(), _params.begin());
-  _params_dirty = true;
+#ifndef NDEBUG
+  _debug_enter_param_api_();
+  try
+  {
+#endif
+    if (static_cast<int>(params.size()) != _param_dim)
+      throw std::invalid_argument(
+        "ParametricWaveNet::SetParams: expected " + std::to_string(_param_dim)
+        + " params, got " + std::to_string(static_cast<int>(params.size())));
+    std::copy(params.begin(), params.end(), _params.begin());
+    _params_dirty = true;
+#ifndef NDEBUG
+  }
+  catch (...)
+  {
+    _debug_leave_param_api_();
+    throw;
+  }
+  _debug_leave_param_api_();
+#endif
 }
 
 std::span<const float> ParametricWaveNet::GetParams() const
 {
-  return _params;
+#ifndef NDEBUG
+  const_cast<ParametricWaveNet*>(this)->_debug_enter_param_api_();
+#endif
+  const auto params = std::span<const float>(_params);
+#ifndef NDEBUG
+  const_cast<ParametricWaveNet*>(this)->_debug_leave_param_api_();
+#endif
+  return params;
 }
 
 int ParametricWaveNet::ParamDim() const
@@ -77,14 +106,40 @@ int ParametricWaveNet::ParamDim() const
 
 void ParametricWaveNet::process(NAM_SAMPLE** input, NAM_SAMPLE** output, const int num_frames)
 {
-  if (_params_dirty)
+#ifndef NDEBUG
+  _debug_enter_param_api_();
+  try
   {
-    for (auto& adapter : _adapters)
-      adapter.Recompute(_params);
-    _params_dirty = false;
+#endif
+    if (_params_dirty)
+    {
+      for (auto& adapter : _adapters)
+        adapter.Recompute(_params);
+      _params_dirty = false;
+    }
+    WaveNet::process(input, output, num_frames);
+#ifndef NDEBUG
   }
-  WaveNet::process(input, output, num_frames);
+  catch (...)
+  {
+    _debug_leave_param_api_();
+    throw;
+  }
+  _debug_leave_param_api_();
+#endif
 }
+
+#ifndef NDEBUG
+void ParametricWaveNet::_debug_enter_param_api_()
+{
+  assert(!_debug_param_api_active.test_and_set(std::memory_order_acquire));
+}
+
+void ParametricWaveNet::_debug_leave_param_api_()
+{
+  _debug_param_api_active.clear(std::memory_order_release);
+}
+#endif
 
 // =============================================================================
 // ParametricWaveNetConfig::create()  — now constructs a real ParametricWaveNet

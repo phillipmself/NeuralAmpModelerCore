@@ -53,9 +53,12 @@ void ParametricAdapter::Recompute(std::span<const float> params)
       "ParametricAdapter::Recompute: expected " + std::to_string(_P) + " params, got "
       + std::to_string((int)params.size()));
   Eigen::Map<const Eigen::VectorXf> p(params.data(), _P);
-  _one_plus_gamma = _gamma_w * p + _gamma_b;
+  // noalias() writes GEMV directly into pre-sized scratch, avoiding heap temporaries.
+  _one_plus_gamma.noalias() = _gamma_w * p;
+  _one_plus_gamma += _gamma_b;
   _one_plus_gamma.array() += 1.0f;
-  _beta = _beta_w * p + _beta_b;
+  _beta.noalias() = _beta_w * p;
+  _beta += _beta_b;
 }
 
 void ParametricAdapter::Apply(Eigen::Ref<Eigen::MatrixXf> z, int num_frames) const

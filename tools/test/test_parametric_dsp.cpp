@@ -1,5 +1,7 @@
 // CP5 synthetic tests: zero-adapter parity + known-adapter behavior change (C2.2d).
 // CP6 seam tests: IParametricControl runtime parameter-control seam (C2.1).
+// C23 realtime-safety: real ParametricWaveNet allocation-free process() and SetParams()
+//   in steady state after Reset(); Reset/prewarm does not reseed nominal params (C2.3).
 //
 // CP5 proves that the parametric adapter hook is behaviorally inert when all
 // adapter weights are zero (identity for any param vector), and that a known
@@ -37,6 +39,7 @@
 #include "NAM/dsp.h"
 #include "NAM/get_dsp.h"
 #include "NAM/wavenet/model.h"
+#include "NAM/wavenet/parametric.h"
 #include "allocation_tracking.h"
 #include "parametric_test_fixtures.h"
 
@@ -149,10 +152,7 @@ static std::vector<float> make_tiny_inner_weights()
   return {1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f};
 }
 
-// Build a JSON-loaded ParametricWaveNet from the tiny fixture with the given beta_w.
-// This keeps the hand-computable behavior test on the real public load path, including
-// weight splitting and adapter-tail ordering.
-static std::unique_ptr<nam::DSP> make_tiny_parametric(float beta_w)
+static nlohmann::json build_tiny_inner_config()
 {
   using nlohmann::json;
 
@@ -184,6 +184,17 @@ static std::unique_ptr<nam::DSP> make_tiny_parametric(float beta_w)
   json config;
   config["layers"] = json::array({layer});
   config["head_scale"] = 1.0f;
+  return config;
+}
+
+// Build a JSON-loaded ParametricWaveNet from the tiny fixture with the given beta_w.
+// This keeps the hand-computable behavior test on the real public load path, including
+// weight splitting and adapter-tail ordering.
+static std::unique_ptr<nam::DSP> make_tiny_parametric(float beta_w)
+{
+  using nlohmann::json;
+
+  json config = build_tiny_inner_config();
   config["param_names"] = json::array({"gain"});
   config["param_dim"] = 1;
   config["nominal_params"] = json::array({0.0f});
@@ -519,6 +530,189 @@ void test_cp6f_dynamic_cast_discovery()
   assert(std::abs(ctrl->GetParams()[0] - 0.5f) < 1e-6f);
 }
 
+// ============================================================================
+// C2.3: realtime-safety and reset/prewarm evidence
+// ============================================================================
+
+// C23a: real ParametricWaveNet process() is allocation-free in steady state
+// after Reset() + one warmup block.
+//
+// Uses the real A2-shaped zero-adapter parametric model (make_zero_adapter_a2_models).
+// Reset() fires prewarm which calls ParametricWaveNet::process() via virtual dispatch,
+// clearing the dirty flag. One explicit warmup block is run outside the tracker so the
+// initial dirty-adapter Recompute happens before tracking begins. The tracked call is
+// one additional process() with pre-allocated buffers.
+void test_c23a_real_parametric_process_no_allocation_after_reset_first_block()
+{
+  auto models = make_zero_adapter_a2_models();
+  nam::DSP& dsp = *models.param_dsp;
+
+  constexpr int kBlock = 64;
+  // Reset triggers prewarm; the first process() call clears _params_dirty.
+  dsp.Reset(48000.0, kBlock);
+
+  // Pre-allocate buffers before the tracker starts.
+  std::vector<NAM_SAMPLE> in_buf(kBlock, 0.0f);
+  std::vector<NAM_SAMPLE> out_buf(kBlock, 0.0f);
+  NAM_SAMPLE* in_arr[] = {in_buf.data()};
+  NAM_SAMPLE* out_arr[] = {out_buf.data()};
+
+  // One explicit warmup block outside the tracker.
+  dsp.process(in_arr, out_arr, kBlock);
+
+  // Tracked block: process() must be allocation-free in steady state.
+  allocation_tracking::run_allocation_test_no_allocations(
+    nullptr,
+    [&]() { dsp.process(in_arr, out_arr, kBlock); },
+    nullptr,
+    "C23a: real ParametricWaveNet process() allocation-free after reset + warmup");
+}
+
+// C23b: SetParams + adapter Recompute + process() are all allocation-free in
+// steady state after warmup. This is the authoritative proof for the combined
+// runtime param update + adapter recompute + inference path.
+//
+// Uses the same real A2-shaped model as C23a. Two fixed param arrays are
+// pre-allocated before tracking begins. SetParams + process() is exercised
+// twice inside the tracker.
+void test_c23b_real_parametric_setparams_and_process_no_allocation_after_warmup()
+{
+  auto models = make_zero_adapter_a2_models();
+  nam::DSP& dsp = *models.param_dsp;
+
+  constexpr int kBlock = 64;
+  dsp.Reset(48000.0, kBlock);
+
+  auto* ctrl = dynamic_cast<nam::IParametricControl*>(&dsp);
+  assert(ctrl != nullptr);
+
+  // Pre-allocate buffers and param arrays before the tracker starts.
+  std::vector<NAM_SAMPLE> in_buf(kBlock, 0.0f);
+  std::vector<NAM_SAMPLE> out_buf(kBlock, 0.0f);
+  NAM_SAMPLE* in_arr[] = {in_buf.data()};
+  NAM_SAMPLE* out_arr[] = {out_buf.data()};
+  const float params_a[] = {0.3f};
+  const float params_b[] = {1.1f};
+
+  // Warmup block outside the tracker.
+  dsp.process(in_arr, out_arr, kBlock);
+
+  // Tracked region: SetParams(a) + process, SetParams(b) + process.
+  // Each SetParams marks the adapter dirty; process() recomputes it before
+  // delegating to WaveNet::process(). All must be allocation-free.
+  allocation_tracking::run_allocation_test_no_allocations(
+    nullptr,
+    [&]() {
+      ctrl->SetParams(params_a);
+      dsp.process(in_arr, out_arr, kBlock);
+      ctrl->SetParams(params_b);
+      dsp.process(in_arr, out_arr, kBlock);
+    },
+    nullptr,
+    "C23b: real ParametricWaveNet SetParams + process() allocation-free after warmup");
+}
+
+// C23c: Reset() + prewarm do NOT reseed nominal params over the last runtime
+// params committed via SetParams().
+//
+// Uses the tiny 1-layer fixture (beta_w=2.0, nominal_params=[0.0]).
+// SetParams({1.0}) is called before Reset. After Reset+prewarm the adapter
+// must still reflect p=1.0, not the nominal p=0.0.
+// Hand-computed expected output: 2*x + beta_w*p = 2*1 + 2*1 = 4.0.
+// If Reset reseeded nominal (p=0), output would be 2*1 + 2*0 = 2.0 → test fails.
+void test_c23c_reset_does_not_reseed_nominal_params()
+{
+  // nominal_params=[0.0]; beta_w=2.0 → output with p=0 is 2x, with p=1 is 4x.
+  auto model = make_tiny_parametric(2.0f);
+
+  auto* ctrl = dynamic_cast<nam::IParametricControl*>(model.get());
+  assert(ctrl != nullptr);
+
+  // Commit non-nominal params before Reset.
+  const float params[] = {1.0f};
+  ctrl->SetParams(params);
+
+  // Reset: prewarm fires via virtual dispatch to ParametricWaveNet::process(),
+  // which clears the dirty flag using the current _params (p=1.0). The nominal
+  // vector must NOT be reseeded over the host-committed value.
+  constexpr int kBlock = 32;
+  model->Reset(48000.0, kBlock);
+
+  // Process one block of constant positive input.
+  constexpr float kX = 1.0f;
+  constexpr float kExpected = 4.0f; // 2*kX + beta_w*p = 2*1 + 2*1
+  std::vector<NAM_SAMPLE> input(kBlock, static_cast<NAM_SAMPLE>(kX));
+  std::vector<NAM_SAMPLE> output(kBlock, 0.0f);
+  NAM_SAMPLE* in_arr[] = {input.data()};
+  NAM_SAMPLE* out_arr[] = {output.data()};
+  model->process(in_arr, out_arr, kBlock);
+
+  constexpr float kEps = 1e-5f;
+  for (int i = 0; i < kBlock; i++)
+    assert(std::abs(static_cast<float>(output[i]) - kExpected) < kEps);
+}
+
+// C23d: first live block after Reset() with prewarm disabled is allocation-free.
+//
+// This covers the host mode where Reset() must avoid prewarm work and the first
+// audible block carries the initial adapter recompute. The tracked block is the
+// first process() call after Reset().
+void test_c23d_real_parametric_first_live_block_no_allocation_without_prewarm()
+{
+  auto models = make_zero_adapter_a2_models();
+  nam::DSP& dsp = *models.param_dsp;
+
+  constexpr int kBlock = 64;
+  dsp.SetPrewarmOnReset(false);
+  dsp.Reset(48000.0, kBlock);
+
+  std::vector<NAM_SAMPLE> in_buf(kBlock, 0.0f);
+  std::vector<NAM_SAMPLE> out_buf(kBlock, 0.0f);
+  NAM_SAMPLE* in_arr[] = {in_buf.data()};
+  NAM_SAMPLE* out_arr[] = {out_buf.data()};
+
+  allocation_tracking::run_allocation_test_no_allocations(
+    nullptr,
+    [&]() { dsp.process(in_arr, out_arr, kBlock); },
+    nullptr,
+    "C23d: first live block allocation-free after Reset() without prewarm");
+}
+
+// Public-constructor hardening: nominal_params must match param_dim even for
+// direct callers that bypass the JSON parser.
+void test_c23e_constructor_rejects_nominal_param_size_mismatch()
+{
+  auto inner_config = nam::wavenet::parse_config_json(build_tiny_inner_config(), 48000.0);
+
+  bool caught = false;
+  try
+  {
+    std::vector<float> adapter_tail = {0.0f, 0.0f, 0.0f, 0.0f};
+    nam::wavenet::ParametricWaveNet model(
+      inner_config.in_channels,
+      inner_config.layer_array_params,
+      inner_config.head_scale,
+      inner_config.with_head,
+      std::move(inner_config.head_params),
+      std::move(inner_config.condition_dsp),
+      2,
+      std::vector<float>{0.0f},
+      make_tiny_inner_weights(),
+      std::move(adapter_tail),
+      48000.0);
+    (void)model;
+    assert(false);
+  }
+  catch (const std::invalid_argument& e)
+  {
+    const std::string msg = e.what();
+    assert(msg.find("nominal_params size") != std::string::npos);
+    assert(msg.find("param_dim 2") != std::string::npos);
+    caught = true;
+  }
+  assert(caught);
+}
+
 } // namespace test_parametric_dsp
 
 void run_parametric_dsp_tests()
@@ -535,4 +729,10 @@ void run_parametric_dsp_tests()
   test_parametric_dsp::test_cp6d_no_allocation_during_steady_state();
   test_parametric_dsp::test_cp6e_dim_mismatch_throws();
   test_parametric_dsp::test_cp6f_dynamic_cast_discovery();
+  // C2.3: realtime-safety and reset/prewarm evidence
+  test_parametric_dsp::test_c23a_real_parametric_process_no_allocation_after_reset_first_block();
+  test_parametric_dsp::test_c23b_real_parametric_setparams_and_process_no_allocation_after_warmup();
+  test_parametric_dsp::test_c23c_reset_does_not_reseed_nominal_params();
+  test_parametric_dsp::test_c23d_real_parametric_first_live_block_no_allocation_without_prewarm();
+  test_parametric_dsp::test_c23e_constructor_rejects_nominal_param_size_mismatch();
 }

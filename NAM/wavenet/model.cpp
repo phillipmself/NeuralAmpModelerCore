@@ -9,6 +9,7 @@
 
 #include "../get_dsp.h"
 #include "../registry.h"
+#include "parametric_adapter.h"
 #include "slimmable.h"
 #include "model.h"
 
@@ -202,6 +203,11 @@ void nam::wavenet::detail::Layer::Process(const Eigen::MatrixXf& input, const Ei
   }
   this->_z.leftCols(num_frames).noalias() =
     _conv.GetOutput().leftCols(num_frames) + _input_mixin.GetOutput().leftCols(num_frames);
+
+  if (this->_adapter != nullptr)
+  {
+    this->_adapter->Apply(this->_z, num_frames);
+  }
 
   if (this->_activation_pre_film)
   {

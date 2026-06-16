@@ -105,6 +105,9 @@ protected:
   /// \return Number of conditioning input channels
   virtual int _get_condition_dim() const { return NumInputChannels(); };
 
+  /// \brief Access layer arrays for adapter wiring (used by ParametricWaveNet in C2.2c).
+  std::vector<detail::LayerArray>& GetLayerArrays() { return _layer_arrays; }
+
 private:
   std::vector<detail::LayerArray> _layer_arrays;
 

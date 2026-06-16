@@ -17,6 +17,11 @@ namespace nam
 {
 namespace wavenet
 {
+
+// Forward declaration — used by detail::Layer for the nullable adapter hook.
+// Full definition is in parametric_adapter.h.
+class ParametricAdapter;
+
 namespace detail
 {
 
@@ -224,6 +229,12 @@ public:
   /// \return Const reference to the internal Conv1D object
   const Conv1D& get_conv() const { return _conv; }
 
+  /// \brief Set the parametric adapter for this layer (null → identity, no-op).
+  ///
+  /// Non-owning; the adapter lifetime is managed by ParametricWaveNet.
+  /// Call before Process(); pointer is read on every Process() call.
+  void SetParametricAdapter(const ParametricAdapter* adapter) { _adapter = adapter; }
+
 private:
   // The dilated convolution at the front of the block
   Conv1D _conv;
@@ -239,6 +250,9 @@ private:
   Eigen::MatrixXf _output_next_layer;
   // Output to head (skip connection: activated conv output)
   Eigen::MatrixXf _output_head;
+
+  // Nullable adapter hook (C2.2b). Non-owning; null for all non-parametric models.
+  const ParametricAdapter* _adapter = nullptr;
 
   activations::Activation::Ptr _activation;
   const GatingMode _gating_mode;
@@ -327,6 +341,9 @@ public:
   /// \brief Set the parameters (weights) of this module
   /// \param it Iterator to the weights vector. Will be advanced as weights are consumed.
   void set_weights_(std::vector<float>::iterator& it);
+
+  /// \brief Access layers for adapter wiring (used by ParametricWaveNet in C2.2c).
+  std::vector<Layer>& GetLayers() { return _layers; }
 
   /// \brief Get the "zero-indexed" receptive field
   ///

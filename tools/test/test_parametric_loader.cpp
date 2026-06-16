@@ -1,17 +1,15 @@
-// CP1: pre-registration fail-loud test for "ParametricWaveNet".
-// Before any parser is registered, a syntactically valid ParametricWaveNet
-// JSON must throw the generic registry error (AD-C2), proving the fixture is
-// well-formed but the architecture is intentionally unsupported.
-// See docs/parametric-a2-core/test-plan.md CP1.
+// CP1 (flipped, C1.2): "ParametricWaveNet" is now a registered architecture.
+// The parser composes wavenet::parse_config_json for the inner config and stores
+// parametric metadata. create() throws "ParametricWaveNet inference not yet
+// implemented" (AD-C4). See docs/parametric-a2-core/test-plan.md CP1/CP4.
 
 #include <cassert>
-#include <memory>
 #include <string>
-#include <vector>
 
 #include "json.hpp"
 
 #include "NAM/get_dsp.h"
+#include "NAM/model_config.h"
 
 namespace test_parametric_loader
 {
@@ -83,7 +81,7 @@ nlohmann::json build_a2_inner_config()
 // Minimal valid ParametricWaveNet fixture.
 // Includes all four keys get_dsp validates before the registry lookup (AD-C11):
 // version, architecture, config, weights. The weights array need not be
-// correctly sized in C1.1 because the registry error fires first.
+// correctly sized in Phase 1 because create() throws before consuming them.
 nlohmann::json build_parametric_fixture()
 {
   using nlohmann::json;
@@ -104,20 +102,44 @@ nlohmann::json build_parametric_fixture()
 
 } // namespace
 
-void test_cp1_unregistered_architecture_throws_registry_error()
+// CP1 (C1.2): "ParametricWaveNet" is registered and get_dsp() reaches create(),
+// which throws the deliberate not-implemented error.
+void test_cp1_registered_parser_throws_not_implemented()
+{
+  assert(nam::ConfigParserRegistry::instance().has("ParametricWaveNet") == true);
+
+  nlohmann::json j = build_parametric_fixture();
+  bool caught = false;
+  try
+  {
+    nam::get_dsp(j);
+    assert(false); // must not reach here — create() must throw
+  }
+  catch (const std::runtime_error& e)
+  {
+    const std::string msg = e.what();
+    assert(msg.find("ParametricWaveNet inference not yet implemented") != std::string::npos);
+    caught = true;
+  }
+  assert(caught);
+}
+
+// CP4: a valid parametric fixture parses successfully, then create() throws.
+// In Phase 1 this is observationally identical to CP1 (AD-C11); kept as a
+// named test so Phase 2 can extend it into a real weight-consuming round-trip.
+void test_cp4_parse_then_create_throws()
 {
   nlohmann::json j = build_parametric_fixture();
   bool caught = false;
   try
   {
     nam::get_dsp(j);
-    assert(false); // must not reach here before the parser is registered
+    assert(false);
   }
   catch (const std::runtime_error& e)
   {
     const std::string msg = e.what();
-    // TODO C1.2: flip this assertion to expect "ParametricWaveNet inference not yet implemented"
-    assert(msg.find("No config parser registered for architecture: ParametricWaveNet") != std::string::npos);
+    assert(msg.find("ParametricWaveNet inference not yet implemented") != std::string::npos);
     caught = true;
   }
   assert(caught);
@@ -127,5 +149,6 @@ void test_cp1_unregistered_architecture_throws_registry_error()
 
 void run_parametric_loader_tests()
 {
-  test_parametric_loader::test_cp1_unregistered_architecture_throws_registry_error();
+  test_parametric_loader::test_cp1_registered_parser_throws_not_implemented();
+  test_parametric_loader::test_cp4_parse_then_create_throws();
 }

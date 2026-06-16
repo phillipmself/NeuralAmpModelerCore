@@ -35,6 +35,7 @@
 #include "test/test_render_slim.cpp"
 #include "test/test_slimmable_wavenet.cpp"
 #include "test/test_a2_fast.cpp"
+#include "test/test_parametric_loader.cpp"
 
 int main()
 {
@@ -299,6 +300,9 @@ int main()
 
   // Extensibility: external architecture registration and get_dsp (issue #230)
   test_extensible::run_extensibility_tests();
+
+  // CP1: ParametricWaveNet pre-registration fail-loud test (C1.1)
+  run_parametric_loader_tests();
 
   // Container / SlimmableContainer tests
   test_container::test_container_loads_from_json();

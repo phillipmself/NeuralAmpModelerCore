@@ -37,6 +37,7 @@
 #include "test/test_a2_fast.cpp"
 #include "test/test_parametric_loader.cpp"
 #include "test/test_parametric_dsp.cpp"
+#include "test/test_parametric_adapter.cpp"
 
 int main()
 {
@@ -307,6 +308,9 @@ int main()
 
   // CP6: ParametricWaveNet runtime parameter-control seam (C2.1)
   run_parametric_dsp_tests();
+
+  // C2.2a: ParametricAdapter module + helpers
+  run_parametric_adapter_tests();
 
   // Container / SlimmableContainer tests
   test_container::test_container_loads_from_json();

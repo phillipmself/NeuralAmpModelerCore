@@ -145,10 +145,105 @@ void test_cp4_parse_then_create_throws()
   assert(caught);
 }
 
+// --- CP2: config-shape negative cases (C1.3) ---
+//
+// Each helper strips one field (or introduces a mismatch) from the valid fixture
+// and asserts that create_parametric_config throws a std::runtime_error whose
+// message names the offending field / both values. Weight-count validation is
+// intentionally NOT tested here (deferred to Phase 2, AD-C10).
+
+// Wraps get_dsp() and asserts a runtime_error whose message contains `needle`.
+void assert_parse_error(nlohmann::json j, const std::string& needle)
+{
+  bool caught = false;
+  try
+  {
+    nam::get_dsp(j);
+    assert(false); // must not reach here
+  }
+  catch (const std::runtime_error& e)
+  {
+    const std::string msg = e.what();
+    assert(msg.find(needle) != std::string::npos);
+    caught = true;
+  }
+  assert(caught);
+}
+
+void test_cp2a_missing_param_names()
+{
+  nlohmann::json j = build_parametric_fixture();
+  j["config"].erase("param_names");
+  assert_parse_error(j, "param_names");
+}
+
+void test_cp2b_missing_param_dim()
+{
+  nlohmann::json j = build_parametric_fixture();
+  j["config"].erase("param_dim");
+  assert_parse_error(j, "param_dim");
+}
+
+void test_cp2c_missing_nominal_params()
+{
+  nlohmann::json j = build_parametric_fixture();
+  j["config"].erase("nominal_params");
+  assert_parse_error(j, "nominal_params");
+}
+
+void test_cp2d_param_dim_names_mismatch()
+{
+  // param_dim=2 but param_names has 1 entry → mismatch; error must mention both values.
+  nlohmann::json j = build_parametric_fixture();
+  j["config"]["param_dim"] = 2;
+  assert_parse_error(j, "param_dim");
+  // Also verify both values appear in the message.
+  bool caught = false;
+  try
+  {
+    nam::get_dsp(j);
+  }
+  catch (const std::runtime_error& e)
+  {
+    const std::string msg = e.what();
+    assert(msg.find("2") != std::string::npos);
+    assert(msg.find("1") != std::string::npos);
+    caught = true;
+  }
+  assert(caught);
+}
+
+void test_cp2e_param_dim_nominal_mismatch()
+{
+  // param_dim=1, nominal_params has 2 entries → mismatch; error must mention both values.
+  nlohmann::json j = build_parametric_fixture();
+  j["config"]["nominal_params"] = nlohmann::json::array({0.5f, 0.5f});
+  assert_parse_error(j, "param_dim");
+  bool caught = false;
+  try
+  {
+    nam::get_dsp(j);
+  }
+  catch (const std::runtime_error& e)
+  {
+    const std::string msg = e.what();
+    assert(msg.find("1") != std::string::npos);
+    assert(msg.find("2") != std::string::npos);
+    caught = true;
+  }
+  assert(caught);
+}
+
 } // namespace test_parametric_loader
 
 void run_parametric_loader_tests()
 {
   test_parametric_loader::test_cp1_registered_parser_throws_not_implemented();
   test_parametric_loader::test_cp4_parse_then_create_throws();
+  // CP2: config-shape negative cases (C1.3)
+  test_parametric_loader::test_cp2a_missing_param_names();
+  test_parametric_loader::test_cp2b_missing_param_dim();
+  test_parametric_loader::test_cp2c_missing_nominal_params();
+  test_parametric_loader::test_cp2d_param_dim_names_mismatch();
+  test_parametric_loader::test_cp2e_param_dim_nominal_mismatch();
 }

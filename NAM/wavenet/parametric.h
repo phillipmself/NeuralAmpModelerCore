@@ -17,15 +17,15 @@ namespace nam
 namespace wavenet
 {
 
-/// \brief Configuration for a ParametricWaveNet model (parser-only until C2.2c)
+/// \brief Configuration for a ParametricWaveNet model.
 ///
-/// Stores the parsed inner WaveNetConfig and the three parametric metadata keys.
+/// Stores the parsed inner WaveNetConfig and the ordered, self-describing parameter
+/// specs (name/min/max/default per parameter). param_dim and the nominal/default vector
+/// are derived from `params` at construction; min/max are UI metadata only.
 struct ParametricWaveNetConfig : public ModelConfig
 {
   WaveNetConfig inner_config;
-  std::vector<std::string> param_names;
-  int param_dim = 0;
-  std::vector<float> nominal_params;
+  std::vector<ParamSpec> params;
 
   // Move-only: owns a move-only WaveNetConfig
   ParametricWaveNetConfig() = default;
@@ -64,8 +64,8 @@ public:
   /// \param with_head           WaveNet with_head
   /// \param head_params         Moved into WaveNet base (move-only)
   /// \param condition_dsp       Moved into WaveNet base (move-only)
-  /// \param param_dim           Dimensionality of the parameter vector
-  /// \param nominal_params      Initial param vector; size must equal param_dim
+  /// \param param_specs         Ordered per-parameter specs; param_dim and the nominal
+  ///                            (default) vector are derived from this. Must be non-empty.
   /// \param inner_weights       Weight slice for the WaveNet base (exact count validated by base ctor)
   /// \param adapter_tail        Adapter weights in sorted distinct-C order
   /// \param sample_rate         Expected sample rate
@@ -75,8 +75,7 @@ public:
                     bool with_head,
                     std::optional<HeadParams> head_params,
                     std::unique_ptr<DSP> condition_dsp,
-                    int param_dim,
-                    std::vector<float> nominal_params,
+                    std::vector<ParamSpec> param_specs,
                     std::vector<float> inner_weights,
                     std::vector<float> adapter_tail,
                     double sample_rate);
@@ -89,6 +88,7 @@ public:
   void SetParams(std::span<const float> params) override;
   std::span<const float> GetParams() const override;
   int ParamDim() const override;
+  const std::vector<ParamSpec>& GetParamSpecs() const override;
 
   /// Recomputes adapters if params are dirty, then delegates to WaveNet::process().
   void process(NAM_SAMPLE** input, NAM_SAMPLE** output, const int num_frames) override;
@@ -103,6 +103,7 @@ private:
 
   std::vector<ParametricAdapter> _adapters;         // one per distinct C, sorted-C order
   std::map<int, size_t> _channel_to_adapter_index;  // C -> index into _adapters
+  std::vector<ParamSpec> _param_specs;               // per-parameter metadata, positional order
   std::vector<float> _params;                        // current param vector (pre-sized)
   int _param_dim;
   bool _params_dirty = true;

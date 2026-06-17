@@ -93,9 +93,10 @@ inline nlohmann::json build_a2_parametric_fixture(const std::vector<float>& weig
   using nlohmann::json;
 
   json config = build_a2_inner_config();
-  config["param_names"] = json::array({"gain"});
-  config["param_dim"] = 1;
-  config["nominal_params"] = json::array({0.5});
+  // Self-describing params array (name/min/max/default); default = old nominal_params[i].
+  config["params"] = json::array({
+    {{"name", "gain"}, {"min", 0.0}, {"max", 1.0}, {"default", 0.5}},
+  });
 
   json j;
   j["version"] = "0.7.0";

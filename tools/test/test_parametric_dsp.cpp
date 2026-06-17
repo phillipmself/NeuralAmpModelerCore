@@ -195,9 +195,10 @@ static std::unique_ptr<nam::DSP> make_tiny_parametric(float beta_w)
   using nlohmann::json;
 
   json config = build_tiny_inner_config();
-  config["param_names"] = json::array({"gain"});
-  config["param_dim"] = 1;
-  config["nominal_params"] = json::array({0.0f});
+  // Self-describing params array; default = old nominal_params[i] = 0.0.
+  config["params"] = json::array({
+    {{"name", "gain"}, {"min", 0.0f}, {"max", 1.0f}, {"default", 0.0f}},
+  });
 
   std::vector<float> weights = make_tiny_inner_weights();
   weights.insert(weights.end(), {0.0f, 0.0f, beta_w, 0.0f});
@@ -224,6 +225,9 @@ public:
   , current_params_(nominal_params)
   {
     assert((int)nominal_params.size() == param_dim);
+    specs_.reserve(param_dim);
+    for (int i = 0; i < param_dim; ++i)
+      specs_.push_back({"p" + std::to_string(i), 0.0f, 1.0f, nominal_params[i]});
   }
 
   void SetParams(std::span<const float> params) override
@@ -237,6 +241,7 @@ public:
 
   std::span<const float> GetParams() const override { return current_params_; }
   int ParamDim() const override { return param_dim_; }
+  const std::vector<nam::ParamSpec>& GetParamSpecs() const override { return specs_; }
 
   void process(NAM_SAMPLE** input, NAM_SAMPLE** output, int num_frames) override
   {
@@ -248,6 +253,7 @@ public:
 private:
   int param_dim_;
   std::vector<float> current_params_;
+  std::vector<nam::ParamSpec> specs_;
 };
 
 } // namespace
@@ -678,9 +684,10 @@ void test_c23d_real_parametric_first_live_block_no_allocation_without_prewarm()
     "C23d: first live block allocation-free after Reset() without prewarm");
 }
 
-// Public-constructor hardening: nominal_params must match param_dim even for
-// direct callers that bypass the JSON parser.
-void test_c23e_constructor_rejects_nominal_param_size_mismatch()
+// Public-constructor hardening: param_specs must be non-empty even for direct callers
+// that bypass the JSON parser. (param_dim and the nominal vector are derived from the
+// specs, so a size mismatch between them is no longer structurally possible.)
+void test_c23e_constructor_rejects_empty_param_specs()
 {
   auto inner_config = nam::wavenet::parse_config_json(build_tiny_inner_config(), 48000.0);
 
@@ -695,8 +702,7 @@ void test_c23e_constructor_rejects_nominal_param_size_mismatch()
       inner_config.with_head,
       std::move(inner_config.head_params),
       std::move(inner_config.condition_dsp),
-      2,
-      std::vector<float>{0.0f},
+      std::vector<nam::ParamSpec>{}, // empty → must throw
       make_tiny_inner_weights(),
       std::move(adapter_tail),
       48000.0);
@@ -706,8 +712,7 @@ void test_c23e_constructor_rejects_nominal_param_size_mismatch()
   catch (const std::invalid_argument& e)
   {
     const std::string msg = e.what();
-    assert(msg.find("nominal_params size") != std::string::npos);
-    assert(msg.find("param_dim 2") != std::string::npos);
+    assert(msg.find("at least one parameter") != std::string::npos);
     caught = true;
   }
   assert(caught);
@@ -734,5 +739,5 @@ void run_parametric_dsp_tests()
   test_parametric_dsp::test_c23b_real_parametric_setparams_and_process_no_allocation_after_warmup();
   test_parametric_dsp::test_c23c_reset_does_not_reseed_nominal_params();
   test_parametric_dsp::test_c23d_real_parametric_first_live_block_no_allocation_without_prewarm();
-  test_parametric_dsp::test_c23e_constructor_rejects_nominal_param_size_mismatch();
+  test_parametric_dsp::test_c23e_constructor_rejects_empty_param_specs();
 }

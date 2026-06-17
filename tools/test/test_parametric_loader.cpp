@@ -2,9 +2,11 @@
 //
 // CP1: parser registration guard (has() == true).
 // RG1: unknown architecture is rejected with registry-error message (C2.3).
-// CP2: config-shape negative cases (malformed param_names / param_dim / nominal_params).
+// CP2: config-shape negatives for the self-describing `params` array (missing array,
+//      malformed entry, default out of [min,max], non-finite, empty) + multi-param order.
 // CP3: adapter-tail weight-count validation (negative: too-short blob; positive: exact size).
-// CP4: real round-trip — get_dsp(), Reset(), process(), IParametricControl discovery.
+// CP4: real round-trip — get_dsp(), Reset(), process(), IParametricControl discovery,
+//      and per-parameter spec (name/min/max/default) readback.
 //
 // See docs/parametric-a2-core/test-plan.md for full CP descriptions.
 
@@ -98,10 +100,18 @@ void test_cp4_real_load_and_process()
   assert(ctrl != nullptr);
   assert(ctrl->ParamDim() == 1);
 
-  // Nominal params are seeded from nominal_params = [0.5].
+  // Nominal params are seeded from the spec defaults = [0.5].
   const auto params = ctrl->GetParams();
   assert(static_cast<int>(params.size()) == 1);
   assert(std::abs(params[0] - 0.5f) < 1e-6f);
+
+  // Per-parameter specs (name/min/max/default) are surfaced in positional order.
+  const auto& specs = ctrl->GetParamSpecs();
+  assert(specs.size() == 1);
+  assert(specs[0].name == "gain");
+  assert(std::abs(specs[0].min - 0.0f) < 1e-6f);
+  assert(std::abs(specs[0].max - 1.0f) < 1e-6f);
+  assert(std::abs(specs[0].defaultValue - 0.5f) < 1e-6f);
 
   // One process() block must complete without throwing.
   NAM_SAMPLE in_buf[kBlockSize] = {};
@@ -159,34 +169,33 @@ void assert_parse_error(nlohmann::json j, const std::string& needle)
   assert(caught);
 }
 
-void test_cp2a_missing_param_names()
+// Missing 'params' on a ParametricWaveNet file → clear, schema-naming error.
+void test_cp2a_missing_params()
 {
   nlohmann::json j = test_parametric_fixtures::build_a2_parametric_fixture({0.0f});
-  j["config"].erase("param_names");
-  assert_parse_error(j, "param_names");
+  j["config"].erase("params");
+  assert_parse_error(j, "missing 'params' array");
 }
 
-void test_cp2b_missing_param_dim()
+// A param entry that omits a required key (here: 'max') → error names the offending index.
+void test_cp2b_param_entry_missing_key()
 {
   nlohmann::json j = test_parametric_fixtures::build_a2_parametric_fixture({0.0f});
-  j["config"].erase("param_dim");
-  assert_parse_error(j, "param_dim");
+  j["config"]["params"] = nlohmann::json::array({
+    {{"name", "gain"}, {"min", 0.0}, {"default", 0.5}}, // no "max"
+  });
+  assert_parse_error(j, "name/min/max/default");
 }
 
-void test_cp2c_missing_nominal_params()
+// default outside [min, max] → error names the parameter and the offending values.
+void test_cp2c_default_out_of_range()
 {
   nlohmann::json j = test_parametric_fixtures::build_a2_parametric_fixture({0.0f});
-  j["config"].erase("nominal_params");
-  assert_parse_error(j, "nominal_params");
-}
-
-void test_cp2d_param_dim_names_mismatch()
-{
-  // param_dim=2 but param_names has 1 entry → mismatch; error must mention both values.
-  nlohmann::json j = test_parametric_fixtures::build_a2_parametric_fixture({0.0f});
-  j["config"]["param_dim"] = 2;
-  assert_parse_error(j, "param_dim");
-  // Also verify both values appear in the message.
+  j["config"]["params"] = nlohmann::json::array({
+    {{"name", "gain"}, {"min", 0.0}, {"max", 1.0}, {"default", 5.0}}, // default > max
+  });
+  assert_parse_error(j, "min <= default <= max");
+  // The parameter name must appear in the message.
   bool caught = false;
   try
   {
@@ -194,33 +203,63 @@ void test_cp2d_param_dim_names_mismatch()
   }
   catch (const std::runtime_error& e)
   {
-    const std::string msg = e.what();
-    assert(msg.find("2") != std::string::npos);
-    assert(msg.find("1") != std::string::npos);
+    assert(std::string(e.what()).find("gain") != std::string::npos);
     caught = true;
   }
   assert(caught);
 }
 
-void test_cp2e_param_dim_nominal_mismatch()
+// Non-finite numeric value → rejected.
+void test_cp2d_non_finite_value()
 {
-  // param_dim=1, nominal_params has 2 entries → mismatch; error must mention both values.
   nlohmann::json j = test_parametric_fixtures::build_a2_parametric_fixture({0.0f});
-  j["config"]["nominal_params"] = nlohmann::json::array({0.5f, 0.5f});
-  assert_parse_error(j, "param_dim");
-  bool caught = false;
-  try
-  {
-    nam::get_dsp(j);
-  }
-  catch (const std::runtime_error& e)
-  {
-    const std::string msg = e.what();
-    assert(msg.find("1") != std::string::npos);
-    assert(msg.find("2") != std::string::npos);
-    caught = true;
-  }
-  assert(caught);
+  j["config"]["params"] = nlohmann::json::array({
+    {{"name", "gain"}, {"min", 0.0}, {"max", INFINITY}, {"default", 0.5}},
+  });
+  assert_parse_error(j, "non-finite");
+}
+
+// Empty 'params' array → rejected.
+void test_cp2e_empty_params()
+{
+  nlohmann::json j = test_parametric_fixtures::build_a2_parametric_fixture({0.0f});
+  j["config"]["params"] = nlohmann::json::array();
+  assert_parse_error(j, "at least one parameter");
+}
+
+// Multi-parameter file → specs parsed in order with per-entry metadata preserved.
+void test_cp2f_multi_param_order_preserved()
+{
+  const int inner_count = test_parametric_fixtures::compute_a2_inner_weight_count();
+  // Two params over the same single channel size C=3 → adapter tail count uses param_dim=2.
+  // distinct C = {3}; adapter weights = 2*C*P + 2*C = 2*3*2 + 2*3 = 18.
+  const int adapter_count = 2 * 3 * 2 + 2 * 3;
+  nlohmann::json j = test_parametric_fixtures::build_a2_parametric_fixture(
+    std::vector<float>(inner_count + adapter_count, 0.0f));
+  j["config"]["params"] = nlohmann::json::array({
+    {{"name", "gain"}, {"min", 0.0}, {"max", 10.0}, {"default", 5.0}},
+    {{"name", "bright"}, {"min", 0.0}, {"max", 1.0}, {"default", 0.5}},
+  });
+
+  auto dsp = nam::get_dsp(j);
+  auto* ctrl = dynamic_cast<nam::IParametricControl*>(dsp.get());
+  assert(ctrl != nullptr);
+  assert(ctrl->ParamDim() == 2);
+
+  const auto& specs = ctrl->GetParamSpecs();
+  assert(specs.size() == 2);
+  assert(specs[0].name == "gain");
+  assert(std::abs(specs[0].max - 10.0f) < 1e-6f);
+  assert(std::abs(specs[0].defaultValue - 5.0f) < 1e-6f);
+  assert(specs[1].name == "bright");
+  assert(std::abs(specs[1].max - 1.0f) < 1e-6f);
+  assert(std::abs(specs[1].defaultValue - 0.5f) < 1e-6f);
+
+  // Nominal params seeded from defaults, in order.
+  const auto params = ctrl->GetParams();
+  assert(params.size() == 2);
+  assert(std::abs(params[0] - 5.0f) < 1e-6f);
+  assert(std::abs(params[1] - 0.5f) < 1e-6f);
 }
 
 } // namespace test_parametric_loader
@@ -236,10 +275,11 @@ void run_parametric_loader_tests()
   test_parametric_loader::test_cp3_correct_size_constructs();
   // CP4: real round-trip (C2.2c)
   test_parametric_loader::test_cp4_real_load_and_process();
-  // CP2: config-shape negatives (C1.3)
-  test_parametric_loader::test_cp2a_missing_param_names();
-  test_parametric_loader::test_cp2b_missing_param_dim();
-  test_parametric_loader::test_cp2c_missing_nominal_params();
-  test_parametric_loader::test_cp2d_param_dim_names_mismatch();
-  test_parametric_loader::test_cp2e_param_dim_nominal_mismatch();
+  // CP2: config-shape negatives for the self-describing `params` array
+  test_parametric_loader::test_cp2a_missing_params();
+  test_parametric_loader::test_cp2b_param_entry_missing_key();
+  test_parametric_loader::test_cp2c_default_out_of_range();
+  test_parametric_loader::test_cp2d_non_finite_value();
+  test_parametric_loader::test_cp2e_empty_params();
+  test_parametric_loader::test_cp2f_multi_param_order_preserved();
 }

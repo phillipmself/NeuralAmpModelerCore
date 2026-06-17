@@ -36,4 +36,9 @@
 docs/_build/
 *.DS_Store
 
+# CMake build trees
+/build/
+/build_no_a2/
+/build-no-a2-fast/
+
 example_audio/output.wav

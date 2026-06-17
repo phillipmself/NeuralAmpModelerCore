@@ -226,6 +226,22 @@ private:
   Level mOutputLevel;
 };
 
+/// \brief Self-describing specification for one continuous control parameter.
+///
+/// Mirrors the Python-side ParamSpec. The list order in which these are exposed is
+/// significant: a spec's position is the positional index into the parameter vector
+/// passed to SetParams(). `name` and the [min, max] range are metadata for the
+/// host/plugin UI (labeled knobs, clamping) and do NOT affect the forward pass,
+/// normalization, or weight loading. `defaultValue` is the nominal value the network
+/// is conditioned on for the export snapshot (exactly the old nominal_params[i]).
+struct ParamSpec
+{
+  std::string name;
+  float min;
+  float max;
+  float defaultValue;
+};
+
 /// \brief Interface for DSP objects that support runtime parameter control.
 ///
 /// Parametric DSPs implement this alongside DSP. Hosts discover the capability
@@ -241,7 +257,7 @@ private:
 ///   next block begins.
 /// - process() consumes the most recently committed vector for the full block.
 /// - SetParams() is allocation-free after construction (storage is pre-sized
-///   from param_dim / nominal_params at object creation).
+///   from the parameter count at object creation).
 class IParametricControl
 {
 public:
@@ -260,6 +276,12 @@ public:
 
   /// Dimensionality of the parameter vector accepted by SetParams().
   virtual int ParamDim() const = 0;
+
+  /// Per-parameter specifications (name / min / max / default), in positional order.
+  /// specs[i] describes the parameter at index i of the SetParams()/GetParams() vector.
+  /// The host/plugin UI uses this to render labeled knobs with correct ranges.
+  /// The returned reference aliases internal storage that lives for the object's lifetime.
+  virtual const std::vector<ParamSpec>& GetParamSpecs() const = 0;
 };
 
 /// \brief Base class for DSP models that require input buffering

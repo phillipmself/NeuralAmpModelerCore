@@ -360,14 +360,17 @@ void Hypernetwork::ApplyConditioning(const std::vector<float>& base, const std::
   for (const auto& layer : _trunk_layers)
   {
     auto& next = use_a ? _hidden_a_scratch : _hidden_b_scratch;
-    next.head(layer.b.size()).noalias() = layer.W * current->head(current_dim) + layer.b;
+    auto next_view = next.head(layer.b.size());
+    next_view = layer.b;
+    next_view.noalias() += layer.W * current->head(current_dim);
     layer.activation->apply(next.data(), layer.b.size());
     current = &next;
     current_dim = static_cast<int>(layer.b.size());
     use_a = !use_a;
   }
 
-  _flat_scratch.noalias() = _final_weight * current->head(current_dim) + _final_bias;
+  _flat_scratch = _final_bias;
+  _flat_scratch.noalias() += _final_weight * current->head(current_dim);
 
   auto flat_offset = 0;
   for (const auto& target : _targets)

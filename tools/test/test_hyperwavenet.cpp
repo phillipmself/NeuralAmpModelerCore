@@ -1,15 +1,17 @@
-// Tests for HyperWaveNet registration and runtime control
+// Tests for HyperWaveNet registration, runtime control, and RT safety
 
+#include <array>
 #include <cassert>
 #include <cmath>
-#include <string>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "json.hpp"
 
 #include "NAM/get_dsp.h"
 #include "NAM/parametric_control.h"
+#include "allocation_tracking.h"
 
 namespace test_hyperwavenet
 {
@@ -77,7 +79,7 @@ nlohmann::json make_config()
 // hypernet_state_count = 0 (trunk) + 4 (final) + 2 (anchor) = 6; base_len = 8; total = 14.
 nlohmann::json make_low_rank_config()
 {
-  auto config = nlohmann::json{
+  return nlohmann::json{
     {"version", "0.7.0"},
     {"metadata", nlohmann::json::object()},
     {"architecture", "HyperWaveNet"},
@@ -137,7 +139,6 @@ nlohmann::json make_low_rank_config()
      }},
     {"sample_rate", 48000},
   };
-  return config;
 }
 
 nlohmann::json make_condition_dsp_json()
@@ -183,16 +184,24 @@ void reset_for_test(nam::DSP& dsp)
   dsp.Reset(sample_rate, buffer_size);
 }
 
-std::vector<float> process_block(nam::DSP& dsp, const float input_value)
+std::vector<float> process_constant_block(nam::DSP& dsp, const float input_value)
 {
   constexpr auto num_frames = 8;
   std::vector<NAM_SAMPLE> input(num_frames, input_value);
   std::vector<NAM_SAMPLE> output(num_frames, 0.0f);
-  NAM_SAMPLE* input_ptrs[] = {input.data()};
-  NAM_SAMPLE* output_ptrs[] = {output.data()};
-  dsp.process(input_ptrs, output_ptrs, num_frames);
+  std::array<NAM_SAMPLE*, 1> input_ptrs{input.data()};
+  std::array<NAM_SAMPLE*, 1> output_ptrs{output.data()};
+  dsp.process(input_ptrs.data(), output_ptrs.data(), num_frames);
 
   return std::vector<float>(output.begin(), output.end());
+}
+
+void process_single_channel(nam::DSP& dsp, std::vector<NAM_SAMPLE>& input, std::vector<NAM_SAMPLE>& output)
+{
+  assert(input.size() == output.size());
+  std::array<NAM_SAMPLE*, 1> input_ptrs{input.data()};
+  std::array<NAM_SAMPLE*, 1> output_ptrs{output.data()};
+  dsp.process(input_ptrs.data(), output_ptrs.data(), static_cast<int>(input.size()));
 }
 
 template <typename Fn>
@@ -250,10 +259,10 @@ void test_load_and_control_hyperwavenet()
   reset_for_test(*nominal_reference);
   reset_for_test(*updated_reference);
 
-  const auto first_output = process_block(*dsp, 1.0f);
-  const auto nominal_first_output = process_block(*nominal_reference, 1.0f);
+  const auto first_output = process_constant_block(*dsp, 1.0f);
+  const auto nominal_first_output = process_constant_block(*nominal_reference, 1.0f);
   updated_control->SetParams(std::vector<float>{1.0f});
-  const auto updated_first_output = process_block(*updated_reference, 1.0f);
+  const auto updated_first_output = process_constant_block(*updated_reference, 1.0f);
 
   for (size_t i = 0; i < first_output.size(); ++i)
   {
@@ -265,9 +274,9 @@ void test_load_and_control_hyperwavenet()
 
   control->SetParams(std::vector<float>{1.0f});
   assert(std::abs(control->GetParams()[0] - 1.0f) < 1.0e-6f);
-  const auto second_output = process_block(*dsp, 1.0f);
-  const auto nominal_second_output = process_block(*nominal_reference, 1.0f);
-  const auto updated_second_output = process_block(*updated_reference, 1.0f);
+  const auto second_output = process_constant_block(*dsp, 1.0f);
+  const auto nominal_second_output = process_constant_block(*nominal_reference, 1.0f);
+  const auto updated_second_output = process_constant_block(*updated_reference, 1.0f);
 
   auto any_changed = false;
   for (size_t i = 0; i < second_output.size(); ++i)
@@ -312,10 +321,10 @@ void test_load_and_control_low_rank_hyperwavenet()
   assert(control->ParamDim() == 1);
 
   reset_for_test(*dsp);
-  const auto first_output = process_block(*dsp, 1.0f);
+  const auto first_output = process_constant_block(*dsp, 1.0f);
 
   control->SetParams(std::vector<float>{1.0f});
-  const auto second_output = process_block(*dsp, 1.0f);
+  const auto second_output = process_constant_block(*dsp, 1.0f);
 
   auto any_changed = false;
   for (size_t i = 0; i < first_output.size(); ++i)
@@ -384,6 +393,33 @@ void test_reject_export_offset_out_of_range()
   config["config"]["hypernet"]["delta_map"][0]["export_offset"] = 100;
 
   assert_throws_runtime_error([&]() { (void)nam::get_dsp(config); }, "exceeds base weight length");
+}
+
+void test_setparams_process_realtime_safe()
+{
+  using namespace allocation_tracking;
+
+  auto dsp = nam::get_dsp(make_config());
+  auto* control = dynamic_cast<nam::IParametricControl*>(dsp.get());
+  assert(control != nullptr);
+
+  reset_for_test(*dsp);
+
+  std::vector<NAM_SAMPLE> input(8, 1.0f);
+  std::vector<NAM_SAMPLE> output(input.size(), 0.0f);
+  process_single_channel(*dsp, input, output); // Warm steady-state buffers before tracking.
+
+  const std::array<float, 1> params{1.0f};
+  run_allocation_test_no_allocations(
+    nullptr,
+    [&]() {
+      control->SetParams(params);
+      process_single_channel(*dsp, input, output);
+    },
+    nullptr, "test_setparams_process_realtime_safe");
+
+  for (const auto sample : output)
+    assert(std::isfinite(sample));
 }
 
 } // namespace test_hyperwavenet

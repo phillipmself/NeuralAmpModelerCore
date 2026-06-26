@@ -109,6 +109,7 @@ int main()
   test_hyperwavenet::test_reject_low_rank_target_under_full_mode();
   test_hyperwavenet::test_reject_short_weight_blob();
   test_hyperwavenet::test_reject_export_offset_out_of_range();
+  test_hyperwavenet::test_setparams_process_realtime_safe();
 
   test_linear::test_direct_known_values();
   test_linear::test_fft_matches_direct_irregular_chunks();

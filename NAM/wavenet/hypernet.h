@@ -34,6 +34,7 @@ public:
   Hypernetwork(const HypernetSpec& spec, const std::vector<ParamSpec>& specs, std::span<const float> hypernet_state);
 
   int EncodedDim() const { return _encoded_dim; }
+  static size_t SerializedStateCount(const HypernetSpec& spec, const std::vector<ParamSpec>& specs);
 
   /// Validate a raw parameter vector. Call this on the CONTROL thread (e.g. from
   /// SetParams) before handing the vector to ApplyConditioning. Throws

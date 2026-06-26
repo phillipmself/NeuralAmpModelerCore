@@ -12,6 +12,7 @@
 #include "test/test_fast_lut.cpp"
 #include "test/test_get_dsp.cpp"
 #include "test/test_hypernet.cpp"
+#include "test/test_hyperwavenet.cpp"
 #include "test/test_ring_buffer.cpp"
 #include "test/test_wavenet/test_layer.cpp"
 #include "test/test_wavenet/test_layer_array.cpp"
@@ -99,6 +100,15 @@ int main()
   test_hypernet::test_apply_conditioning_offsets();
   test_hypernet::test_constructor_validation();
   test_hypernet::test_mixed_targets_and_repeated_calls();
+  test_hyperwavenet::test_load_and_control_hyperwavenet();
+  test_hyperwavenet::test_load_and_control_low_rank_hyperwavenet();
+  test_hyperwavenet::test_reject_condition_dsp_for_now();
+  test_hyperwavenet::test_reject_duplicate_param_names();
+  test_hyperwavenet::test_reject_switch_param_out_of_range();
+  test_hyperwavenet::test_reject_non_integer_switch_index();
+  test_hyperwavenet::test_reject_low_rank_target_under_full_mode();
+  test_hyperwavenet::test_reject_short_weight_blob();
+  test_hyperwavenet::test_reject_export_offset_out_of_range();
 
   test_linear::test_direct_known_values();
   test_linear::test_fft_matches_direct_irregular_chunks();

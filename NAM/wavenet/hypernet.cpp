@@ -71,6 +71,9 @@ void validate_param_spec(const nam::ParamSpec& spec)
 
 int compute_encoded_dim(const std::vector<nam::ParamSpec>& specs)
 {
+  // Note: duplicate parameter names are a config-policy concern (the host needs unique
+  // names to map knobs) and do not affect the encode math, so that check lives in the
+  // HyperWaveNet config parser (parse_params), not here.
   auto encoded_dim = 0;
   for (const auto& spec : specs)
   {
@@ -115,6 +118,11 @@ namespace nam
 {
 namespace wavenet
 {
+
+size_t Hypernetwork::SerializedStateCount(const HypernetSpec& spec, const std::vector<ParamSpec>& specs)
+{
+  return static_cast<size_t>(_compute_hypernet_state_count(spec, compute_encoded_dim(specs)));
+}
 
 int Hypernetwork::_compute_hypernet_state_count(const HypernetSpec& spec, const int encoded_dim)
 {
@@ -231,7 +239,7 @@ Hypernetwork::Hypernetwork(const HypernetSpec& spec, const std::vector<ParamSpec
   if (spec.low_rank_mode && any_low_rank && spec.rank <= 0)
     throw std::invalid_argument("Hypernetwork: low_rank_mode requires rank > 0");
 
-  const auto expected_state_count = _compute_hypernet_state_count(spec, _encoded_dim);
+  const auto expected_state_count = static_cast<int>(SerializedStateCount(spec, _specs));
   if (hypernet_state.size() != static_cast<size_t>(expected_state_count))
   {
     std::ostringstream ss;

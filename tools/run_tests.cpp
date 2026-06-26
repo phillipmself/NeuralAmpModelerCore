@@ -11,6 +11,7 @@
 #include "test/test_film_realtime_safe.cpp"
 #include "test/test_fast_lut.cpp"
 #include "test/test_get_dsp.cpp"
+#include "test/test_hypernet.cpp"
 #include "test/test_ring_buffer.cpp"
 #include "test/test_wavenet/test_layer.cpp"
 #include "test/test_wavenet/test_layer_array.cpp"
@@ -90,6 +91,14 @@ int main()
   test_dsp::test_reset_and_prewarm_forces_prewarm();
   test_dsp::test_reset_and_prewarm_restores_prewarm_on_throw();
   test_dsp::test_scoped_prewarm_on_reset_default();
+
+  test_hypernet::test_encode_continuous_and_switch();
+  test_hypernet::test_switch_validation();
+  test_hypernet::test_full_mode_decode();
+  test_hypernet::test_low_rank_decode();
+  test_hypernet::test_apply_conditioning_offsets();
+  test_hypernet::test_constructor_validation();
+  test_hypernet::test_mixed_targets_and_repeated_calls();
 
   test_linear::test_direct_known_values();
   test_linear::test_fft_matches_direct_irregular_chunks();

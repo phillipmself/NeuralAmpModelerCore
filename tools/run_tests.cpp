@@ -13,6 +13,7 @@
 #include "test/test_get_dsp.cpp"
 #include "test/test_hypernet.cpp"
 #include "test/test_hyperwavenet.cpp"
+#include "test/test_hyperwavenet_parity.cpp"
 #include "test/test_ring_buffer.cpp"
 #include "test/test_wavenet/test_layer.cpp"
 #include "test/test_wavenet/test_layer_array.cpp"
@@ -110,6 +111,8 @@ int main()
   test_hyperwavenet::test_reject_short_weight_blob();
   test_hyperwavenet::test_reject_export_offset_out_of_range();
   test_hyperwavenet::test_setparams_process_realtime_safe();
+  test_hyperwavenet_parity::test_matches_python_golden_and_baked_wavenet();
+  test_hyperwavenet_parity::test_setparams_process_no_allocation_real_model();
 
   test_linear::test_direct_known_values();
   test_linear::test_fft_matches_direct_irregular_chunks();

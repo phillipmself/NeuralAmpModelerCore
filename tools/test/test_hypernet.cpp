@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "NAM/wavenet/hypernet.h"
+#include "NAM/hypernet.h"
 
 namespace test_hypernet
 {
@@ -25,15 +25,15 @@ nam::ParamSpec make_switch_spec(const std::string& name, const std::vector<std::
     name, 0.0f, static_cast<float>(enum_names.size() - 1), static_cast<float>(default_value), "switch", enum_names};
 }
 
-nam::wavenet::Hypernetwork::Target make_full_target(const std::string& name, const int numel, const int export_offset)
+nam::Hypernetwork::Target make_full_target(const std::string& name, const int numel, const int export_offset)
 {
-  return nam::wavenet::Hypernetwork::Target{name, false, numel, export_offset, 0, 0, 0, numel};
+  return nam::Hypernetwork::Target{name, false, numel, export_offset, 0, 0, 0, numel};
 }
 
-nam::wavenet::Hypernetwork::Target make_low_rank_target(const std::string& name, const int export_offset,
-                                                        const int rank, const int out_features, const int rest_features)
+nam::Hypernetwork::Target make_low_rank_target(const std::string& name, const int export_offset, const int rank,
+                                               const int out_features, const int rest_features)
 {
-  return nam::wavenet::Hypernetwork::Target{
+  return nam::Hypernetwork::Target{
     name,         true,          out_features * rest_features,         export_offset, rank,
     out_features, rest_features, rank * (out_features + rest_features)};
 }
@@ -93,7 +93,7 @@ void test_encode_continuous_and_switch()
     make_switch_spec("mode", {"clean", "edge", "mean"}, 1),
   };
 
-  nam::wavenet::HypernetSpec hypernet_spec;
+  nam::HypernetSpec hypernet_spec;
   hypernet_spec.hidden_sizes = {};
   hypernet_spec.activation = nam::activations::ActivationConfig::simple(nam::activations::ActivationType::ReLU);
   hypernet_spec.low_rank_mode = false;
@@ -105,7 +105,7 @@ void test_encode_continuous_and_switch()
     0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
   };
 
-  const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+  const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   assert(hypernetwork.EncodedDim() == 4); // 1 continuous + 3-way switch one-hot
 
   std::vector<float> out;
@@ -127,7 +127,7 @@ void test_switch_validation()
     make_switch_spec("mode", {"clean", "edge", "mean"}, 0),
   };
 
-  nam::wavenet::HypernetSpec hypernet_spec;
+  nam::HypernetSpec hypernet_spec;
   hypernet_spec.hidden_sizes = {};
   hypernet_spec.activation = nam::activations::ActivationConfig::simple(nam::activations::ActivationType::ReLU);
   hypernet_spec.low_rank_mode = false;
@@ -138,7 +138,7 @@ void test_switch_validation()
     1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
   };
 
-  const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+  const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   std::vector<float> out;
 
   // Validation is a control-thread concern: non-integer and out-of-range switch
@@ -159,7 +159,7 @@ void test_full_mode_decode()
     make_continuous_spec("tone", 0.0f, 1.0f, 0.5f),
   };
 
-  nam::wavenet::HypernetSpec hypernet_spec;
+  nam::HypernetSpec hypernet_spec;
   hypernet_spec.hidden_sizes = {2};
   hypernet_spec.activation = nam::activations::ActivationConfig::simple(nam::activations::ActivationType::ReLU);
   hypernet_spec.low_rank_mode = false;
@@ -170,7 +170,7 @@ void test_full_mode_decode()
     1.0f, -2.0f, 0.5f, -0.25f, 2.0f, 10.0f, -1.0f, 1.0f, 0.5f, -0.5f, 0.1f, -0.2f, 0.3f, 0.0f, 0.0f, 0.0f,
   };
 
-  const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+  const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   std::vector<float> out;
   hypernetwork.ApplyConditioning(std::vector<float>(3, 0.0f), std::vector<float>{0.75f}, out);
 
@@ -183,7 +183,7 @@ void test_low_rank_decode()
     make_continuous_spec("gain", 0.0f, 1.0f, 0.5f),
   };
 
-  nam::wavenet::HypernetSpec hypernet_spec;
+  nam::HypernetSpec hypernet_spec;
   hypernet_spec.hidden_sizes = {};
   hypernet_spec.activation = nam::activations::ActivationConfig::simple(nam::activations::ActivationType::ReLU);
   hypernet_spec.low_rank_mode = true;
@@ -207,7 +207,7 @@ void test_low_rank_decode()
   weights.insert(weights.end(), final_bias.begin(), final_bias.end());
   weights.insert(weights.end(), anchor.begin(), anchor.end());
 
-  const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+  const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   std::vector<float> out;
   hypernetwork.ApplyConditioning(std::vector<float>(6, 0.0f), std::vector<float>{0.5f}, out);
 
@@ -229,7 +229,7 @@ void test_apply_conditioning_offsets()
     make_continuous_spec("presence", 0.0f, 1.0f, 0.5f),
   };
 
-  nam::wavenet::HypernetSpec hypernet_spec;
+  nam::HypernetSpec hypernet_spec;
   hypernet_spec.hidden_sizes = {};
   hypernet_spec.activation = nam::activations::ActivationConfig::simple(nam::activations::ActivationType::ReLU);
   hypernet_spec.low_rank_mode = false;
@@ -243,7 +243,7 @@ void test_apply_conditioning_offsets()
     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.5f, -1.0f, 2.0f, 3.0f, 4.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
   };
 
-  const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+  const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   const std::vector<float> base{10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f, 70.0f, 80.0f};
   std::vector<float> out;
   hypernetwork.ApplyConditioning(base, std::vector<float>{0.5f}, out);
@@ -253,7 +253,7 @@ void test_apply_conditioning_offsets()
 
 void test_constructor_validation()
 {
-  nam::wavenet::HypernetSpec hypernet_spec;
+  nam::HypernetSpec hypernet_spec;
   hypernet_spec.hidden_sizes = {};
   hypernet_spec.activation = nam::activations::ActivationConfig::simple(nam::activations::ActivationType::ReLU);
   hypernet_spec.low_rank_mode = false;
@@ -265,7 +265,7 @@ void test_constructor_validation()
       nam::ParamSpec{"", 0.0f, 1.0f, 0.5f, "continuous", {}},
     };
     const std::vector<float> weights{0.0f, 0.0f, 0.0f};
-    const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+    const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   });
 
   assert_throws_invalid_argument([&]() {
@@ -273,7 +273,7 @@ void test_constructor_validation()
       nam::ParamSpec{"bad_type", 0.0f, 1.0f, 0.5f, "mystery", {}},
     };
     const std::vector<float> weights{0.0f, 0.0f, 0.0f};
-    const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+    const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   });
 
   assert_throws_invalid_argument([&]() {
@@ -281,7 +281,7 @@ void test_constructor_validation()
       nam::ParamSpec{"bad_range", 1.0f, 1.0f, 1.0f, "continuous", {}},
     };
     const std::vector<float> weights{0.0f, 0.0f, 0.0f};
-    const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+    const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   });
 
   assert_throws_invalid_argument([&]() {
@@ -289,7 +289,7 @@ void test_constructor_validation()
       nam::ParamSpec{"mode", 0.0f, 0.0f, 0.0f, "switch", {"clean"}},
     };
     const std::vector<float> weights{0.0f, 0.0f, 0.0f};
-    const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+    const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   });
 
   assert_throws_invalid_argument([&]() {
@@ -302,7 +302,7 @@ void test_constructor_validation()
       make_full_target("second", 2, 2),
     };
     const std::vector<float> weights(10, 0.0f);
-    const nam::wavenet::Hypernetwork hypernetwork(overlapping_spec, specs, weights);
+    const nam::Hypernetwork hypernetwork(overlapping_spec, specs, weights);
   });
 }
 
@@ -313,7 +313,7 @@ void test_mixed_targets_and_repeated_calls()
     make_switch_spec("mode", {"clean", "edge"}, 0),
   };
 
-  nam::wavenet::HypernetSpec hypernet_spec;
+  nam::HypernetSpec hypernet_spec;
   hypernet_spec.hidden_sizes = {};
   hypernet_spec.activation = nam::activations::ActivationConfig::simple(nam::activations::ActivationType::ReLU);
   hypernet_spec.low_rank_mode = true;
@@ -364,7 +364,7 @@ void test_mixed_targets_and_repeated_calls()
     0.5f,
   };
 
-  const nam::wavenet::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
+  const nam::Hypernetwork hypernetwork(hypernet_spec, specs, weights);
   const std::vector<float> base{10.0f, 20.0f, 30.0f, 100.0f, 200.0f, 300.0f, 400.0f};
   std::vector<float> out{999.0f, 999.0f};
 

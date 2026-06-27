@@ -6,9 +6,9 @@
 #include <span>
 #include <vector>
 
+#include "../hypernet.h"
 #include "../model_config.h"
 #include "../parametric_control.h"
-#include "hypernet.h"
 #include "model.h"
 
 namespace nam
@@ -26,8 +26,8 @@ public:
   // weight blob today.
   HyperWaveNet(int in_channels, const std::vector<LayerArrayParams>& layer_array_params, float head_scale,
                bool with_head, std::optional<HeadParams> head_params, std::unique_ptr<DSP> condition_dsp,
-               std::vector<ParamSpec> param_specs, const HypernetSpec& hypernet_spec, std::vector<float> base_weights,
-               std::span<const float> hypernet_state, double sample_rate);
+               std::vector<ParamSpec> param_specs, const nam::HypernetSpec& hypernet_spec,
+               std::vector<float> base_weights, std::span<const float> hypernet_state, double sample_rate);
 
   void SetParams(std::span<const float> params) override;
   std::span<const float> GetParams() const override;
@@ -46,7 +46,7 @@ private:
   std::vector<float> _params;
   std::vector<float> _base_weights;
   std::vector<float> _conditioned;
-  Hypernetwork _hypernet;
+  nam::Hypernetwork _hypernet;
   bool _dirty = true;
   int _param_dim = 0;
 #ifndef NDEBUG
@@ -61,7 +61,7 @@ struct HyperWaveNetConfig : public ModelConfig
   // create_hyperwavenet_config() rejects condition_dsp explicitly.
   WaveNetConfig inner;
   std::vector<ParamSpec> params;
-  HypernetSpec hypernet;
+  nam::HypernetSpec hypernet;
 
   HyperWaveNetConfig() = default;
   HyperWaveNetConfig(HyperWaveNetConfig&&) = default;

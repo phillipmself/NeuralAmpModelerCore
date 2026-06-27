@@ -108,13 +108,13 @@ std::vector<nam::ParamSpec> parse_params(const nlohmann::json& config)
   return params;
 }
 
-nam::wavenet::HypernetSpec parse_hypernet(const nlohmann::json& config)
+nam::HypernetSpec parse_hypernet(const nlohmann::json& config)
 {
   if (!config.contains("hypernet") || !config.at("hypernet").is_object())
     throw std::runtime_error("HyperWaveNet config missing 'hypernet' object.");
 
   const auto& hypernet_json = config.at("hypernet");
-  nam::wavenet::HypernetSpec hypernet;
+  nam::HypernetSpec hypernet;
 
   if (hypernet_json.contains("hidden_sizes"))
     hypernet.hidden_sizes = hypernet_json.at("hidden_sizes").get<std::vector<int>>();
@@ -162,7 +162,7 @@ nam::wavenet::HypernetSpec parse_hypernet(const nlohmann::json& config)
       throw std::runtime_error(where + " must define name/numel/export_offset.");
 
     const auto entry_mode = entry.value("mode", mode);
-    nam::wavenet::Hypernetwork::Target target{};
+    nam::Hypernetwork::Target target{};
     target.name = entry.at("name").get<std::string>();
     target.low_rank = entry_mode == "low_rank";
     target.numel = entry.at("numel").get<int>();
@@ -212,7 +212,7 @@ nam::wavenet::HypernetSpec parse_hypernet(const nlohmann::json& config)
   return hypernet;
 }
 
-void validate_target_ranges(const std::vector<nam::wavenet::Hypernetwork::Target>& targets, const size_t base_len)
+void validate_target_ranges(const std::vector<nam::Hypernetwork::Target>& targets, const size_t base_len)
 {
   for (const auto& target : targets)
   {
@@ -233,7 +233,7 @@ namespace wavenet
 
 HyperWaveNet::HyperWaveNet(int in_channels, const std::vector<LayerArrayParams>& layer_array_params, float head_scale,
                            bool with_head, std::optional<HeadParams> head_params, std::unique_ptr<DSP> condition_dsp,
-                           std::vector<ParamSpec> param_specs, const HypernetSpec& hypernet_spec,
+                           std::vector<ParamSpec> param_specs, const nam::HypernetSpec& hypernet_spec,
                            std::vector<float> base_weights, const std::span<const float> hypernet_state,
                            const double sample_rate)
 : WaveNet(in_channels, layer_array_params, head_scale, with_head, std::move(head_params),
@@ -344,7 +344,7 @@ std::unique_ptr<DSP> HyperWaveNetConfig::create(std::vector<float> weights, cons
       "condition nested WaveNet weights explicitly before applying delta_map export_offset ranges.");
   }
 
-  const auto hypernet_state_count = Hypernetwork::SerializedStateCount(hypernet, params);
+  const auto hypernet_state_count = nam::Hypernetwork::SerializedStateCount(hypernet, params);
   if (weights.size() <= hypernet_state_count)
   {
     throw std::runtime_error("HyperWaveNet: weight blob too short for base WaveNet plus hypernet state.");

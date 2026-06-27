@@ -116,8 +116,6 @@ Eigen::VectorXf read_vector(std::span<const float> weights, size_t& offset, cons
 
 namespace nam
 {
-namespace wavenet
-{
 
 size_t Hypernetwork::SerializedStateCount(const HypernetSpec& spec, const std::vector<ParamSpec>& specs)
 {
@@ -406,5 +404,4 @@ void Hypernetwork::ApplyConditioning(const std::vector<float>& base, const std::
   assert(flat_offset == _flat_scratch.size());
 }
 
-} // namespace wavenet
 } // namespace nam

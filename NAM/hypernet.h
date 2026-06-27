@@ -6,14 +6,11 @@
 
 #include <Eigen/Dense>
 
-#include "../activations.h"
-#include "../parametric_control.h"
+#include "activations.h"
+#include "parametric_control.h"
 
 namespace nam
 {
-namespace wavenet
-{
-
 struct HypernetSpec;
 
 class Hypernetwork
@@ -88,5 +85,4 @@ struct HypernetSpec
   std::vector<Hypernetwork::Target> targets;
 };
 
-} // namespace wavenet
 } // namespace nam
